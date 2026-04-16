@@ -1,0 +1,26 @@
+﻿# コアGUI
+PySide6>=6.5.0
+
+# OCR・画像処理
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# データ可視化
+matplotlib>=3.7.0
+wordcloud>=1.9.0
+pandas>=2.0.0
+
+# Web抽出
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# python-office サブモジュール（必要最小限）
+popdf>=1.0.0
+pofile>=0.1.5
+poemail>=0.1.0
+pospider>=0.0.1
+porobot>=0.0.3
+
+# その他
+openpyxl>=3.1.0
+loguru>=0.7.0

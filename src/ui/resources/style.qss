@@ -1,0 +1,155 @@
+/* ============================================================
+   Office AI アシスタント - スタイルシート
+   和風モダンテーマ（ライトモード / ダークモード対応予定）
+   ============================================================ */
+
+/* メインウィンドウ */
+QMainWindow {
+    background-color: #faf9f8;
+    font-family: "Meiryo", "Yu Gothic", "Segoe UI", sans-serif;
+}
+
+/* タブウィジェット全体 */
+QTabWidget::pane {
+    border: 1px solid #d0cfce;
+    background-color: #ffffff;
+    border-radius: 8px;
+    margin-top: -1px;
+}
+
+/* 左側のタブバー */
+QTabBar {
+    alignment: center;
+}
+
+QTabBar::tab {
+    background-color: #f0efed;
+    color: #1e1e1e;
+    padding: 12px 20px;
+    margin: 4px 8px 4px 0;
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
+    font-size: 14px;
+    font-weight: normal;
+}
+
+QTabBar::tab:selected {
+    background-color: #4a6fa5;
+    color: white;
+    font-weight: bold;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #e1dfdc;
+}
+
+/* すべてのボタン */
+QPushButton {
+    background-color: #4a6fa5;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: normal;
+}
+
+QPushButton:hover {
+    background-color: #3a5a8a;
+}
+
+QPushButton:pressed {
+    background-color: #2c4570;
+}
+
+QPushButton:disabled {
+    background-color: #b0b0b0;
+    color: #e0e0e0;
+}
+
+/* ラインエディット & テキストエディット */
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QListWidget {
+    border: 1px solid #c0c0c0;
+    border-radius: 6px;
+    padding: 6px 8px;
+    background-color: white;
+    font-size: 13px;
+}
+
+QLineEdit:focus, QTextEdit:focus {
+    border: 2px solid #4a6fa5;
+    outline: none;
+}
+
+/* ラベル */
+QLabel {
+    color: #2c3e50;
+    font-size: 13px;
+}
+
+/* ステータスバー */
+QStatusBar {
+    background-color: #f0efed;
+    color: #5a5a5a;
+    border-top: 1px solid #d0cfce;
+    padding: 4px;
+}
+
+/* グループボックス */
+QGroupBox {
+    border: 1px solid #d0cfce;
+    border-radius: 8px;
+    margin-top: 12px;
+    padding-top: 8px;
+    font-weight: bold;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px 0 6px;
+    background-color: #faf9f8;
+}
+
+/* スクロールバー */
+QScrollBar:vertical {
+    border: none;
+    background: #f0f0f0;
+    width: 12px;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:vertical {
+    background: #c0c0c0;
+    border-radius: 6px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #a0a0a0;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+/* メッセージボックス */
+QMessageBox {
+    background-color: white;
+}
+
+QMessageBox QPushButton {
+    min-width: 80px;
+}
+
+/* プログレスバー（もし使うなら） */
+QProgressBar {
+    border: 1px solid #c0c0c0;
+    border-radius: 5px;
+    text-align: center;
+}
+
+QProgressBar::chunk {
+    background-color: #4a6fa5;
+    border-radius: 4px;
+}
