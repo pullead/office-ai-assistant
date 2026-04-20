@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from pathlib import Path
 import re
-from popdf import html_to_pdf  # python-officeの機能（実際には簡易実装）
+# 修正: html_to_pdf は存在しないため削除。txt_to_pdf はメソッド内でインポート済み
 
 
 class WebExtractor:
@@ -36,8 +36,7 @@ class WebExtractor:
     def save_as_pdf(self, url: str, output_name: str = "webpage.pdf") -> str:
         """WebページをPDFとして保存（popdf利用）"""
         text = self.extract_text(url)
-        # 簡易的にテキストをPDFに変換（実際にはpopdfのhtml_to_pdfを使用するのが理想）
-        # ここではpopdfが存在する前提で実装
+        # popdf の txt_to_pdf 関数を使用
         from popdf import txt_to_pdf
         pdf_path = self.output_dir / output_name
         txt_to_pdf(text, str(pdf_path))

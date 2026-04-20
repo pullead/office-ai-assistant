@@ -32,26 +32,22 @@ class Config:
 
     def _set_defaults(self):
         """デフォルト設定"""
-        # 言語設定（'ja', 'en', 'zh'）
         self.parser['General'] = {
             'language': 'ja',
-            'theme': 'light'  # 'light' or 'dark'
+            'theme': 'light'
         }
-        # メール設定
         self.parser['Email'] = {
             'smtp_server': 'smtp.gmail.com',
             'smtp_port': '587',
             'sender_email': '',
             'sender_password': ''
         }
-        # AI設定（オプション）
         self.parser['AI'] = {
             'openai_api_key': '',
             'use_local': 'True'
         }
 
     def save(self):
-        """設定をファイルに保存"""
         with open(self.config_file, 'w', encoding='utf-8') as f:
             self.parser.write(f)
 

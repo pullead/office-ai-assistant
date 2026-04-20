@@ -4,6 +4,8 @@ OCRエンジン - 画像テキスト変換 + 請求書自動認識
 日本語・英語対応（Tesseract使用）
 """
 import pytesseract
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+import pytesseract
 from PIL import Image
 import re
 from typing import Dict, Optional

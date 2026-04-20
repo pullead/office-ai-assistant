@@ -1,135 +1,252 @@
 # -*- coding: utf-8 -*-
-"""
-メール自動送信タブ - 添付ファイル付きメール
-"""
+"""メール自動送信タブ"""
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-                               QTextEdit, QLineEdit, QLabel, QFileDialog, QMessageBox, QListWidget)
-from PySide6.QtCore import Qt
+                               QTextEdit, QLineEdit, QLabel, QFileDialog,
+                               QMessageBox, QListWidget, QProgressBar,
+                               QFrame, QDialog, QFormLayout, QDialogButtonBox,
+                               QComboBox)
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QFont
+from src.ui.tabs.base_tab import BaseTab, make_section_label, make_badge
 from src.core.email_sender import EmailSender
 from src.config import Config
 
 
-class EmailTab(QWidget):
-    def __init__(self):
+class EmailWorker(QThread):
+    finished = Signal(bool)
+    error = Signal(str)
+
+    def __init__(self, sender, to, subject, body, attachments):
         super().__init__()
+        self.sender = sender
+        self.to = to
+        self.subject = subject
+        self.body = body
+        self.attachments = attachments
+
+    def run(self):
+        try:
+            ok = self.sender.send(self.to, self.subject, self.body, self.attachments)
+            self.finished.emit(ok)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class EmailTab(BaseTab):
+    def __init__(self):
+        super().__init__(
+            title="メール自動送信",
+            subtitle="SMTPを使って添付ファイル付きメールを送信します",
+            icon="📧"
+        )
         self.config = Config()
-        self.sender = None
-        self.attachments = []  # 添付ファイルパスのリスト
-        self.setup_ui()
-        self.load_sender_from_config()
+        self.email_sender = None
+        self.attachments: list[str] = []
+        self.worker = None
+        self._setup_content()
+        self._load_config()
 
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
+    def _setup_content(self):
+        cl = self.card_layout
 
-        # 宛先
-        to_layout = QHBoxLayout()
-        to_layout.addWidget(QLabel("宛先:"))
+        # ── 設定状態バッジ ──
+        status_row = QHBoxLayout()
+        status_row.addWidget(make_section_label("送信設定"))
+        status_row.addStretch()
+        self.status_badge = make_badge("未設定", "Warning")
+        status_row.addWidget(self.status_badge)
+        cl.addLayout(status_row)
+
+        self.config_btn = QPushButton("⚙  SMTP設定")
+        self.config_btn.setObjectName("SecondaryButton")
+        self.config_btn.setMinimumHeight(38)
+        self.config_btn.setCursor(Qt.PointingHandCursor)
+        self.config_btn.clicked.connect(self._show_config)
+        cl.addWidget(self.config_btn)
+
+        # ── 宛先・件名 ──
+        cl.addWidget(make_section_label("宛先 / 件名"))
         self.to_input = QLineEdit()
-        self.to_input.setPlaceholderText("example@example.com")
-        to_layout.addWidget(self.to_input)
-        layout.addLayout(to_layout)
+        self.to_input.setPlaceholderText("recipient@example.com")
+        self.to_input.setMinimumHeight(40)
+        cl.addWidget(self.to_input)
 
-        # 件名
-        sub_layout = QHBoxLayout()
-        sub_layout.addWidget(QLabel("件名:"))
         self.subject_input = QLineEdit()
-        sub_layout.addWidget(self.subject_input)
-        layout.addLayout(sub_layout)
+        self.subject_input.setPlaceholderText("件名")
+        self.subject_input.setMinimumHeight(40)
+        cl.addWidget(self.subject_input)
 
-        # 本文
-        layout.addWidget(QLabel("本文:"))
+        # ── 本文 ──
+        cl.addWidget(make_section_label("本文"))
         self.body_text = QTextEdit()
-        self.body_text.setPlaceholderText("メール本文を入力...")
-        layout.addWidget(self.body_text)
+        self.body_text.setPlaceholderText("メール本文を入力してください...")
+        self.body_text.setMinimumHeight(160)
+        self.body_text.setFont(QFont("Meiryo", 11))
+        cl.addWidget(self.body_text, 1)
 
-        # 添付ファイル
-        attach_layout = QHBoxLayout()
-        self.add_attach_btn = QPushButton("添付ファイル追加")
-        self.add_attach_btn.clicked.connect(self.add_attachment)
+        # ── 添付ファイル ──
+        attach_label_row = QHBoxLayout()
+        attach_label_row.addWidget(make_section_label("添付ファイル"))
+        attach_label_row.addStretch()
+        add_attach = QPushButton("＋  追加")
+        add_attach.setObjectName("ToolButton")
+        add_attach.setMinimumHeight(32)
+        add_attach.setCursor(Qt.PointingHandCursor)
+        add_attach.clicked.connect(self._add_attachment)
+        remove_attach = QPushButton("－  削除")
+        remove_attach.setObjectName("ToolButton")
+        remove_attach.setMinimumHeight(32)
+        remove_attach.setCursor(Qt.PointingHandCursor)
+        remove_attach.clicked.connect(self._remove_attachment)
+        attach_label_row.addWidget(add_attach)
+        attach_label_row.addWidget(remove_attach)
+        cl.addLayout(attach_label_row)
+
         self.attach_list = QListWidget()
-        self.attach_list.setMaximumHeight(80)
-        attach_layout.addWidget(self.add_attach_btn)
-        attach_layout.addWidget(self.attach_list)
-        layout.addLayout(attach_layout)
+        self.attach_list.setMaximumHeight(90)
+        self.attach_list.setFont(QFont("Meiryo", 10))
+        cl.addWidget(self.attach_list)
 
-        # 送信ボタン
-        self.send_btn = QPushButton("メール送信")
-        self.send_btn.clicked.connect(self.send_email)
-        layout.addWidget(self.send_btn)
+        # ── プログレスバー ──
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setFixedHeight(6)
+        cl.addWidget(self.progress_bar)
 
-        # 設定ボタン（簡易）
-        self.config_btn = QPushButton("メール設定（SMTP）")
-        self.config_btn.clicked.connect(self.show_config_dialog)
-        layout.addWidget(self.config_btn)
+        # ── 送信ボタン ──
+        self.send_btn = QPushButton("📤  メール送信")
+        self.send_btn.setObjectName("PrimaryButton")
+        self.send_btn.setMinimumHeight(44)
+        self.send_btn.setCursor(Qt.PointingHandCursor)
+        self.send_btn.clicked.connect(self._send)
+        cl.addWidget(self.send_btn)
 
-        # ステータス表示
-        self.status_label = QLabel("未送信")
-        layout.addWidget(self.status_label)
+    def _load_config(self):
+        email = self.config.get('Email', 'sender_email', fallback='')
+        pw = self.config.get('Email', 'sender_password', fallback='')
+        if email and pw:
+            try:
+                self.email_sender = EmailSender.from_config(self.config)
+                self.status_badge.setText(f"✅  {email}")
+                self.status_badge.setObjectName("BadgeSuccess")
+                self.status_badge.style().unpolish(self.status_badge)
+                self.status_badge.style().polish(self.status_badge)
+            except Exception:
+                pass
 
-    def load_sender_from_config(self):
-        sender_email = self.config.get('Email', 'sender_email')
-        password = self.config.get('Email', 'sender_password')
-        if sender_email and password:
-            self.sender = EmailSender.from_config(self.config)
-            self.status_label.setText(f"設定済み: {sender_email}")
-        else:
-            self.status_label.setText("未設定 → 設定ボタンからSMTP情報を入力してください")
-
-    def add_attachment(self):
+    def _add_attachment(self):
         path, _ = QFileDialog.getOpenFileName(self, "添付ファイルを選択")
         if path:
             self.attachments.append(path)
-            self.attach_list.addItem(path.split('/')[-1])
+            self.attach_list.addItem(path.split('/')[-1].split('\\')[-1])
 
-    def send_email(self):
+    def _remove_attachment(self):
+        row = self.attach_list.currentRow()
+        if row >= 0:
+            self.attach_list.takeItem(row)
+            self.attachments.pop(row)
+
+    def _send(self):
         to = self.to_input.text().strip()
         subject = self.subject_input.text().strip()
         body = self.body_text.toPlainText().strip()
 
         if not to or not subject or not body:
-            QMessageBox.warning(self, "エラー", "宛先・件名・本文は必須です。")
+            QMessageBox.warning(self, "入力エラー", "宛先・件名・本文は必須です。")
+            return
+        if self.email_sender is None:
+            QMessageBox.warning(self, "設定エラー",
+                                "SMTP設定が未完了です。\n「⚙ SMTP設定」ボタンから設定してください。")
             return
 
-        if self.sender is None:
-            QMessageBox.warning(self, "エラー",
-                                "メール設定が完了していません。設定ボタンからSMTP情報を入力してください。")
-            return
+        self.send_btn.setEnabled(False)
+        self.config_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
 
-        success = self.sender.send(to, subject, body, self.attachments)
-        if success:
-            QMessageBox.information(self, "成功", "メールを送信しました。")
-            self.status_label.setText("送信完了")
+        self.worker = EmailWorker(
+            self.email_sender, to, subject, body, self.attachments)
+        self.worker.finished.connect(self._on_sent)
+        self.worker.error.connect(self._on_error)
+        self.worker.start()
+
+    def _on_sent(self, ok: bool):
+        if ok:
+            QMessageBox.information(self, "送信完了", "メールを送信しました ✅")
         else:
-            QMessageBox.critical(self, "失敗", "メール送信に失敗しました。設定を確認してください。")
-            self.status_label.setText("送信失敗")
+            QMessageBox.critical(self, "送信失敗", "送信に失敗しました。設定を確認してください。")
+        self._reset_ui()
 
-    def show_config_dialog(self):
-        from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit, QDialogButtonBox
-        dialog = QDialog(self)
-        dialog.setWindowTitle("SMTP設定")
-        form = QFormLayout(dialog)
+    def _on_error(self, msg: str):
+        QMessageBox.critical(self, "エラー", f"送信エラー:\n{msg}")
+        self._reset_ui()
 
-        server_edit = QLineEdit(self.config.get('Email', 'smtp_server'))
-        port_edit = QLineEdit(self.config.get('Email', 'smtp_port'))
-        email_edit = QLineEdit(self.config.get('Email', 'sender_email'))
+    def _reset_ui(self):
+        self.send_btn.setEnabled(True)
+        self.config_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.worker = None
+
+    def _show_config(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("SMTP 設定")
+        dlg.setMinimumWidth(420)
+        form = QFormLayout(dlg)
+        form.setSpacing(12)
+        form.setContentsMargins(20, 20, 20, 20)
+
+        presets = QComboBox()
+        presets.addItems(["手動入力", "Gmail", "Outlook / Hotmail", "Yahoo Mail"])
+        form.addRow("プリセット:", presets)
+
+        server_edit = QLineEdit(self.config.get('Email', 'smtp_server', fallback=''))
+        server_edit.setPlaceholderText("smtp.gmail.com")
+        server_edit.setMinimumHeight(36)
+        form.addRow("SMTPサーバー:", server_edit)
+
+        port_edit = QLineEdit(self.config.get('Email', 'smtp_port', fallback='587'))
+        port_edit.setMinimumHeight(36)
+        form.addRow("ポート:", port_edit)
+
+        email_edit = QLineEdit(self.config.get('Email', 'sender_email', fallback=''))
+        email_edit.setMinimumHeight(36)
+        form.addRow("送信元メール:", email_edit)
+
         pass_edit = QLineEdit()
         pass_edit.setEchoMode(QLineEdit.Password)
-
-        form.addRow("SMTPサーバー:", server_edit)
-        form.addRow("ポート:", port_edit)
-        form.addRow("送信元メール:", email_edit)
+        pass_edit.setPlaceholderText("アプリパスワードを入力")
+        pass_edit.setMinimumHeight(36)
         form.addRow("パスワード:", pass_edit)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        form.addRow(buttons)
+        PRESETS = {
+            "Gmail": ("smtp.gmail.com", "587"),
+            "Outlook / Hotmail": ("smtp.office365.com", "587"),
+            "Yahoo Mail": ("smtp.mail.yahoo.com", "587"),
+        }
+        def apply_preset(text):
+            if text in PRESETS:
+                server_edit.setText(PRESETS[text][0])
+                port_edit.setText(PRESETS[text][1])
+        presets.currentTextChanged.connect(apply_preset)
 
-        if dialog.exec() == QDialog.Accepted:
+        btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        btns.button(QDialogButtonBox.Save).setText("💾  保存")
+        btns.button(QDialogButtonBox.Cancel).setText("キャンセル")
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+
+        if dlg.exec() == QDialog.Accepted:
             self.config.set('Email', 'smtp_server', server_edit.text())
             self.config.set('Email', 'smtp_port', port_edit.text())
             self.config.set('Email', 'sender_email', email_edit.text())
             if pass_edit.text():
                 self.config.set('Email', 'sender_password', pass_edit.text())
-            self.load_sender_from_config()
-            QMessageBox.information(self, "設定完了", "SMTP設定を保存しました。")
+            self._load_config()
+            QMessageBox.information(self, "保存完了", "SMTP設定を保存しました。")
+
+    def closeEvent(self, event):
+        if self.worker and self.worker.isRunning():
+            self.worker.terminate()
+            self.worker.wait()
+        event.accept()
