@@ -1,69 +1,73 @@
 # -*- coding: utf-8 -*-
 """
-Web抽出モジュール - URLからテキスト抽出・PDF保存・電子書籍変換
+Web 抽出モジュール。
+URL から本文を抽出し、テキスト保存や PDF 保存を行う。
 """
+
+from pathlib import Path
+
 import requests
 from bs4 import BeautifulSoup
-from pathlib import Path
-import re
-# 修正: html_to_pdf は存在しないため削除。txt_to_pdf はメソッド内でインポート済み
 
 
 class WebExtractor:
-    """Webページからコンテンツを抽出し、PDFや電子書籍形式で保存"""
+    """Web ページの本文を扱うクラス。"""
 
-    def __init__(self, output_dir: str = None):
+    def __init__(self, output_dir: str | None = None):
         self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "web_output"
-        self.output_dir.mkdir(exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def extract_text(self, url: str) -> str:
-        """URLから本文テキストを抽出"""
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.encoding = 'utf-8'
-        soup = BeautifulSoup(resp.text, 'html.parser')
+        """URL から本文テキストを抽出する。"""
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            )
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        response.encoding = response.apparent_encoding or "utf-8"
 
-        # スクリプト・スタイルを除去
-        for script in soup(["script", "style"]):
-            script.decompose()
+        soup = BeautifulSoup(response.text, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
 
-        text = soup.get_text(separator='\n')
-        lines = (line.strip() for line in text.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        text = '\n'.join(chunk for chunk in chunks if chunk)
-        return text
+        text = soup.get_text(separator="\n")
+        lines = [line.strip() for line in text.splitlines()]
+        compact_lines = [line for line in lines if line]
+        return "\n".join(compact_lines)
 
     def save_as_pdf(self, url: str, output_name: str = "webpage.pdf") -> str:
-        """WebページをPDFとして保存（popdf利用）"""
-        text = self.extract_text(url)
-        # popdf の txt_to_pdf 関数を使用
+        """抽出テキストを PDF として保存する。"""
         from popdf import txt_to_pdf
-        pdf_path = self.output_dir / output_name
-        txt_to_pdf(text, str(pdf_path))
-        return str(pdf_path)
+
+        text = self.extract_text(url)
+        output_path = self.output_dir / output_name
+        txt_to_pdf(text, str(output_path))
+        return str(output_path)
 
     def save_as_epub(self, url: str, output_name: str = "book.epub") -> str:
         """
-        URLからEPUB電子書籍を生成（簡易実装）
-        実際にはEbookLibなどが必要だが、ここではプレースホルダ
+        EPUB ライブラリ未導入環境でも使えるよう、
+        まずはテキスト保存を代替手段とする。
         """
-        # 完全なEPUB生成は複雑なため、サンプルとしてテキスト保存
         text = self.extract_text(url)
-        epub_path = self.output_dir / output_name.replace('.epub', '.txt')
-        with open(epub_path, 'w', encoding='utf-8') as f:
-            f.write(text)
-        return str(epub_path) + " (テキストとして保存)"
+        output_path = self.output_dir / output_name.replace(".epub", ".txt")
+        with open(output_path, "w", encoding="utf-8") as file:
+            file.write(text)
+        return str(output_path)
 
-    def batch_extract(self, urls: list) -> list:
-        """複数URLを一括処理"""
+    def batch_extract(self, urls: list[str]) -> list[str]:
+        """複数 URL を連続で抽出する。"""
         results = []
-        for idx, url in enumerate(urls):
+        for index, url in enumerate(urls, start=1):
             try:
                 text = self.extract_text(url)
-                out_file = self.output_dir / f"extract_{idx + 1}.txt"
-                with open(out_file, 'w', encoding='utf-8') as f:
-                    f.write(text)
-                results.append(str(out_file))
-            except Exception as e:
-                results.append(f"エラー: {url} - {str(e)}")
+                output_path = self.output_dir / f"extract_{index}.txt"
+                with open(output_path, "w", encoding="utf-8") as file:
+                    file.write(text)
+                results.append(str(output_path))
+            except Exception as error:
+                results.append(f"エラー: {url} - {error}")
         return results

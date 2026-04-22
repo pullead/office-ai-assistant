@@ -1,18 +1,21 @@
 # -*- coding: utf-8 -*-
-"""ファイル操作ヘルパー（共通関数）"""
+"""ファイル操作の小さな補助関数。"""
+
 import os
-import shutil
 from pathlib import Path
 
-def ensure_dir(path):
-    """ディレクトリが存在することを保証"""
+
+def ensure_dir(path: str | Path):
+    """ディレクトリがなければ作成する。"""
     Path(path).mkdir(parents=True, exist_ok=True)
 
-def get_file_size(path):
-    """ファイルサイズを人間可読な形式で返す"""
+
+def get_file_size(path: str | Path) -> str:
+    """ファイルサイズを読みやすい形式で返す。"""
     size = os.path.getsize(path)
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if size < 1024.0:
-            return f"{size:.1f} {unit}"
-        size /= 1024.0
-    return f"{size:.1f} TB"
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TB"
