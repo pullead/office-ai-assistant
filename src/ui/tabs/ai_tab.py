@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPageSize, QPdfWriter, QTextDocument
 from PySide6.QtWidgets import (
     QFileDialog,
     QCheckBox,
@@ -75,8 +76,12 @@ class AIWorker(QThread):
                 title = self.mode
 
             api_html = None
+            api_error = None
             if self.use_api and self.llm_client.is_enabled() and self.llm_client.is_configured():
-                api_html = self.llm_client.summarize_to_html(title, local_result)
+                try:
+                    api_html = self.llm_client.summarize_to_html(title, local_result)
+                except Exception as error:
+                    api_error = str(error)
 
             self.finished.emit(
                 {
@@ -84,6 +89,7 @@ class AIWorker(QThread):
                     "mode": self.mode,
                     "local_result": local_result,
                     "api_html": api_html,
+                    "api_error": api_error,
                     "file_path": self.file_path,
                     "url": self.url,
                 }
@@ -106,6 +112,7 @@ class AITab(BaseTab):
         self.llm_client = LLMClient()
         self.worker = None
         self.selected_file = None
+        self.last_pdf_path = None
         self._setup_content()
 
     def _setup_content(self):
@@ -227,6 +234,13 @@ class AITab(BaseTab):
         self.copy_btn.clicked.connect(self._copy_result)
         action_row.addWidget(self.copy_btn)
 
+        self.open_pdf_btn = QPushButton("PDF レポートを開く")
+        self.open_pdf_btn.setObjectName("ToolButton")
+        self.open_pdf_btn.setMinimumHeight(44)
+        self.open_pdf_btn.setEnabled(False)
+        self.open_pdf_btn.clicked.connect(self._open_pdf)
+        action_row.addWidget(self.open_pdf_btn)
+
         self.clear_btn = QPushButton("入力をクリア")
         self.clear_btn.setObjectName("ToolButton")
         self.clear_btn.setMinimumHeight(44)
@@ -322,6 +336,8 @@ class AITab(BaseTab):
     ):
         """ワーカーを起動する。"""
         self._set_busy(True)
+        self.last_pdf_path = None
+        self.open_pdf_btn.setEnabled(False)
         self.worker = AIWorker(
             assistant=self.assistant,
             llm_client=self.llm_client,
@@ -386,19 +402,25 @@ class AITab(BaseTab):
         self.input_text.clear()
         self.url_input.clear()
         self._clear_file()
+        self.last_pdf_path = None
+        self.open_pdf_btn.setEnabled(False)
         self.result_panel.set_plain_report("")
         self.result_panel.clear_preview()
 
     def _on_finished(self, payload: dict):
         """処理完了時の表示を行う。"""
         html = payload.get("api_html") or self._build_local_html(payload)
+        if payload.get("api_error"):
+            html = self._append_api_warning(html, payload["api_error"])
         self.result_panel.set_report_html(html)
         self._update_preview(payload)
+        self.last_pdf_path = self._export_pdf_report(payload, html)
+        self.open_pdf_btn.setEnabled(bool(self.last_pdf_path))
 
     def _on_error(self, message: str):
         """エラーを表示する。"""
         self.result_panel.set_report_html(
-            f"<h2>エラー</h2><p>{message}</p>"
+            f"<h2>エラー</h2><p>{self._escape_html(message)}</p>"
         )
         self.result_panel.clear_preview()
 
@@ -419,6 +441,8 @@ class AITab(BaseTab):
         }
         title = title_map.get(payload["mode"], "分析結果")
         body = self._escape_html(payload["local_result"]).replace("\n", "<br>")
+        file_name = Path(payload["file_path"]).name if payload.get("file_path") else "なし"
+        url = payload.get("url") or "なし"
         api_note = ""
         if self.use_api_box.isChecked() and not self.llm_client.is_configured():
             api_note = "<p style='color:#b45309;'>AI API は未設定のため、ローカル分析結果を表示しています。</p>"
@@ -427,10 +451,28 @@ class AITab(BaseTab):
             f"<h2 style='margin-bottom:8px;'>{title}</h2>"
             "<p style='color:#475569;'>大きな右側ペインで全文とプレビューを確認できます。</p>"
             f"{api_note}"
+            "<table style='width:100%;border-collapse:collapse;margin-bottom:10px;'>"
+            f"{self._table_row('モード', payload.get('mode', 'unknown'))}"
+            f"{self._table_row('対象ファイル', file_name)}"
+            f"{self._table_row('URL', url)}"
+            f"{self._table_row('文字数', str(len(payload.get('local_result', ''))))}"
+            "</table>"
             "<div style='background:#fffdf8;border:1px solid #eadfce;border-radius:18px;padding:18px;'>"
             f"<div style='line-height:1.7;font-size:14px;'>{body}</div>"
             "</div></div>"
         )
+
+    def _append_api_warning(self, html: str, message: str) -> str:
+        """API 失敗時の警告を本文へ追記する。"""
+        warning = (
+            "<div style='margin-bottom:10px;padding:10px 12px;border-radius:10px;"
+            "background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;'>"
+            "<b>AI API 連携は失敗しました。</b><br>"
+            f"{self._escape_html(message)}<br>"
+            "ローカル解析結果を継続表示しています。"
+            "</div>"
+        )
+        return warning + html
 
     def _update_preview(self, payload: dict):
         """関連プレビューを更新する。"""
@@ -445,28 +487,83 @@ class AITab(BaseTab):
             self.result_panel.show_image(str(path))
             return
         if suffix == ".csv":
-            dataframe = pd.read_csv(path)
-            self.result_panel.show_table_from_dataframe(dataframe.head(200))
+            dataframe = self._read_csv_with_fallback(path)
+            if dataframe is not None:
+                self.result_panel.show_table_from_dataframe(dataframe.head(200))
+            else:
+                self.result_panel.show_text_preview(payload["local_result"])
             return
         if suffix in {".xlsx", ".xls"}:
-            dataframe = pd.read_excel(path)
-            self.result_panel.show_table_from_dataframe(dataframe.head(200))
+            try:
+                dataframe = pd.read_excel(path)
+                self.result_panel.show_table_from_dataframe(dataframe.head(200))
+            except Exception:
+                self.result_panel.show_text_preview(payload["local_result"])
             return
         try:
-            self.result_panel.show_text_preview(path.read_text(encoding="utf-8")[:12000])
+            self.result_panel.show_text_preview(self._read_text_with_fallback(path)[:12000])
         except Exception:
             self.result_panel.show_text_preview(payload["local_result"])
 
     def _set_busy(self, busy: bool):
         """実行中の UI 状態を切り替える。"""
-        for button in (self.run_btn, self.smart_btn, self.file_btn, self.clear_file_btn, self.api_settings_btn):
+        for button in (
+            self.run_btn,
+            self.smart_btn,
+            self.file_btn,
+            self.clear_file_btn,
+            self.api_settings_btn,
+            self.open_pdf_btn,
+        ):
             button.setEnabled(not busy)
         self.progress_bar.setVisible(busy)
 
     def _reset_ui(self, *_args):
         """ワーカー終了後の後始末を行う。"""
         self._set_busy(False)
+        self.open_pdf_btn.setEnabled(bool(self.last_pdf_path))
         self.worker = None
+
+    def _export_pdf_report(self, payload: dict, html_report: str) -> str | None:
+        """AI レポートを PDF へ保存する。"""
+        try:
+            output_dir = Path("output") / "reports"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pdf_path = output_dir / f"ai_{payload['mode']}_{timestamp}.pdf"
+            content = (
+                "<html><head><meta charset='utf-8'>"
+                "<style>"
+                "body{font-family:'Yu Gothic UI','Meiryo',sans-serif;color:#1f2937;line-height:1.7;padding:24px;}"
+                "h1{font-size:24px;margin-bottom:8px;} .meta{font-size:12px;color:#475569;}"
+                ".box{border:1px solid #e7dcc7;border-radius:14px;padding:14px;background:#fffdf8;margin-top:12px;}"
+                "</style></head><body>"
+                "<h1>AI 分析レポート</h1>"
+                f"<p class='meta'>生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} / "
+                f"モード: {self._escape_html(payload.get('mode', 'unknown'))}</p>"
+                f"<div class='box'>{html_report}</div>"
+                "</body></html>"
+            )
+            writer = QPdfWriter(str(pdf_path))
+            writer.setPageSize(QPageSize(QPageSize.A4))
+            writer.setResolution(96)
+            document = QTextDocument()
+            document.setHtml(content)
+            document.print_(writer)
+            return str(pdf_path)
+        except Exception:
+            return None
+
+    def _open_pdf(self):
+        """最新 PDF を開く。"""
+        if not self.last_pdf_path:
+            return
+        path = Path(self.last_pdf_path)
+        if not path.exists():
+            return
+        import os
+
+        os.startfile(str(path))
 
     def _escape_html(self, text: str) -> str:
         """HTML エスケープを行う。"""
@@ -475,6 +572,33 @@ class AITab(BaseTab):
             .replace("<", "&lt;")
             .replace(">", "&gt;")
         )
+
+    def _table_row(self, label: str, value: str) -> str:
+        """2列テーブル行を返す。"""
+        return (
+            "<tr>"
+            f"<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;width:22%;'>{self._escape_html(str(label))}</td>"
+            f"<td style='border:1px solid #e7dcc7;padding:6px;'>{self._escape_html(str(value))}</td>"
+            "</tr>"
+        )
+
+    def _read_csv_with_fallback(self, path: Path):
+        """CSV を文字コード候補で読み込む。"""
+        for encoding in ("utf-8-sig", "utf-8", "cp932", "shift_jis", "latin-1"):
+            try:
+                return pd.read_csv(path, encoding=encoding)
+            except Exception:
+                continue
+        return None
+
+    def _read_text_with_fallback(self, path: Path) -> str:
+        """テキストを文字コード候補で読み込む。"""
+        for encoding in ("utf-8-sig", "utf-8", "cp932", "shift_jis", "latin-1"):
+            try:
+                return path.read_text(encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+        return ""
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():

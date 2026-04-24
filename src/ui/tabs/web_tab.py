@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtGui import QPageSize, QPdfWriter, QTextDocument
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -49,11 +51,15 @@ class WebWorker(QThread):
                 saved_path = self.extractor.save_as_epub(self.url)
 
             api_html = None
+            api_error = None
             if self.use_api and self.llm_client.is_enabled() and self.llm_client.is_configured():
-                api_html = self.llm_client.summarize_to_html(
-                    "Web 抽出レポート",
-                    f"URL: {self.url}\n\n{text}",
-                )
+                try:
+                    api_html = self.llm_client.summarize_to_html(
+                        "Web 抽出レポート",
+                        f"URL: {self.url}\n\n{text}",
+                    )
+                except Exception as error:
+                    api_error = str(error)
 
             self.finished.emit(
                 {
@@ -62,6 +68,7 @@ class WebWorker(QThread):
                     "text": text,
                     "saved_path": saved_path,
                     "api_html": api_html,
+                    "api_error": api_error,
                 }
             )
         except Exception as error:
@@ -80,6 +87,7 @@ class WebTab(BaseTab):
         self.extractor = WebExtractor(output_dir="web_output")
         self.llm_client = LLMClient()
         self.worker = None
+        self.last_pdf_path = None
         self._setup_content()
 
     def _setup_content(self):
@@ -134,6 +142,12 @@ class WebTab(BaseTab):
         self.copy_btn.clicked.connect(self._copy_result)
         controls_layout.addWidget(self.copy_btn)
 
+        self.open_pdf_btn = QPushButton("PDF レポートを開く")
+        self.open_pdf_btn.setObjectName("ToolButton")
+        self.open_pdf_btn.setEnabled(False)
+        self.open_pdf_btn.clicked.connect(self._open_pdf)
+        controls_layout.addWidget(self.open_pdf_btn)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(False)
@@ -176,6 +190,8 @@ class WebTab(BaseTab):
             self.url_input.setText(url)
 
         self._set_buttons(False)
+        self.last_pdf_path = None
+        self.open_pdf_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.worker = WebWorker(self.extractor, self.llm_client, url, mode, self.use_api_box.isChecked())
         self.worker.finished.connect(self._on_finished)
@@ -187,30 +203,58 @@ class WebTab(BaseTab):
     def _on_finished(self, payload: dict):
         """抽出結果を表示する。"""
         html = payload.get("api_html") or self._build_report_html(payload)
+        if payload.get("api_error"):
+            html = self._append_api_warning(html, payload["api_error"])
         self.result_panel.set_report_html(html)
         self.result_panel.show_text_preview(payload["text"][:20000])
+        self.last_pdf_path = self._export_pdf_report(payload, html)
+        self.open_pdf_btn.setEnabled(bool(self.last_pdf_path))
 
     def _on_error(self, message: str):
         """エラーを表示する。"""
-        self.result_panel.set_report_html(f"<h2>エラー</h2><p>{message}</p>")
+        self.result_panel.set_report_html(f"<h2>エラー</h2><p>{self._escape_html(message)}</p>")
         self.result_panel.clear_preview()
+        self.last_pdf_path = None
+        self.open_pdf_btn.setEnabled(False)
 
     def _build_report_html(self, payload: dict) -> str:
         """ローカル抽出結果を HTML 化する。"""
-        save_info = ""
-        if payload.get("saved_path"):
-            save_info = f"<p><b>保存先:</b> {self._escape_html(payload['saved_path'])}</p>"
+        saved_path = payload.get("saved_path")
+        save_cell = self._escape_html(saved_path) if saved_path else "なし"
         preview = self._escape_html(payload["text"][:1200]).replace("\n", "<br>")
         return (
             "<div style='font-family:Yu Gothic UI,Meiryo,sans-serif;color:#1f2937;'>"
             "<h2>Web 抽出レポート</h2>"
-            f"<p><b>URL:</b> {self._escape_html(payload['url'])}</p>"
-            f"<p><b>本文文字数:</b> {len(payload['text'])}</p>"
-            f"{save_info}"
+            "<table style='width:100%;border-collapse:collapse;margin-bottom:10px;'>"
+            "<tr>"
+            "<td style='border:1px solid #e7dcc7;padding:8px;background:#f8f5ef;width:22%;'><b>URL</b></td>"
+            f"<td style='border:1px solid #e7dcc7;padding:8px;'>{self._escape_html(payload['url'])}</td>"
+            "</tr>"
+            "<tr>"
+            "<td style='border:1px solid #e7dcc7;padding:8px;background:#f8f5ef;'><b>本文文字数</b></td>"
+            f"<td style='border:1px solid #e7dcc7;padding:8px;'>{len(payload['text'])}</td>"
+            "</tr>"
+            "<tr>"
+            "<td style='border:1px solid #e7dcc7;padding:8px;background:#f8f5ef;'><b>保存先</b></td>"
+            f"<td style='border:1px solid #e7dcc7;padding:8px;'>{save_cell}</td>"
+            "</tr>"
+            "</table>"
             "<h3>プレビュー</h3>"
             f"<div style='background:#fffdf8;border:1px solid #eadfce;border-radius:18px;padding:16px;line-height:1.7;'>{preview}</div>"
             "</div>"
         )
+
+    def _append_api_warning(self, html: str, message: str) -> str:
+        """API 失敗時の警告を本文へ追記する。"""
+        warning = (
+            "<div style='margin-bottom:10px;padding:10px 12px;border-radius:10px;"
+            "background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;'>"
+            "<b>AI API 連携は失敗しました。</b><br>"
+            f"{self._escape_html(message)}<br>"
+            "ローカル抽出結果でレポートを継続表示しています。"
+            "</div>"
+        )
+        return warning + html
 
     def _copy_result(self):
         """結果をコピーする。"""
@@ -222,14 +266,55 @@ class WebTab(BaseTab):
 
     def _set_buttons(self, enabled: bool):
         """ボタン状態を切り替える。"""
-        for button in (self.text_btn, self.pdf_btn, self.epub_btn, self.api_settings_btn):
+        for button in (self.text_btn, self.pdf_btn, self.epub_btn, self.api_settings_btn, self.open_pdf_btn):
             button.setEnabled(enabled)
 
     def _reset_ui(self, *_args):
         """処理終了後の後始末を行う。"""
         self._set_buttons(True)
+        self.open_pdf_btn.setEnabled(bool(self.last_pdf_path))
         self.progress_bar.setVisible(False)
         self.worker = None
+
+    def _export_pdf_report(self, payload: dict, html_report: str) -> str | None:
+        """Web 抽出レポートを PDF へ保存する。"""
+        try:
+            output_dir = Path("output") / "reports"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pdf_path = output_dir / f"web_report_{timestamp}.pdf"
+            content = (
+                "<html><head><meta charset='utf-8'>"
+                "<style>"
+                "body{font-family:'Yu Gothic UI','Meiryo',sans-serif;color:#1f2937;line-height:1.7;padding:24px;}"
+                "h1{font-size:24px;margin-bottom:8px;} .meta{font-size:12px;color:#475569;}"
+                ".box{border:1px solid #e7dcc7;border-radius:14px;padding:14px;background:#fffdf8;margin-top:12px;}"
+                "</style></head><body>"
+                "<h1>Web 抽出 PDF レポート</h1>"
+                f"<p class='meta'>生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>"
+                f"<div class='box'>{html_report}</div>"
+                "</body></html>"
+            )
+            writer = QPdfWriter(str(pdf_path))
+            writer.setPageSize(QPageSize(QPageSize.A4))
+            writer.setResolution(96)
+            document = QTextDocument()
+            document.setHtml(content)
+            document.print_(writer)
+            return str(pdf_path)
+        except Exception:
+            return None
+
+    def _open_pdf(self):
+        """最新 PDF を開く。"""
+        if not self.last_pdf_path:
+            return
+        path = Path(self.last_pdf_path)
+        if not path.exists():
+            return
+        import os
+
+        os.startfile(str(path))
 
     def _escape_html(self, text: str) -> str:
         """HTML エスケープを行う。"""

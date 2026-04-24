@@ -40,11 +40,14 @@ class WebExtractor:
 
     def save_as_pdf(self, url: str, output_name: str = "webpage.pdf") -> str:
         """抽出テキストを PDF として保存する。"""
-        from popdf import txt_to_pdf
-
         text = self.extract_text(url)
         output_path = self.output_dir / output_name
-        txt_to_pdf(text, str(output_path))
+        try:
+            from popdf import txt_to_pdf
+
+            txt_to_pdf(text, str(output_path))
+        except Exception:
+            self._save_text_pdf_fallback(text, output_path)
         return str(output_path)
 
     def save_as_epub(self, url: str, output_name: str = "book.epub") -> str:
@@ -71,3 +74,27 @@ class WebExtractor:
             except Exception as error:
                 results.append(f"エラー: {url} - {error}")
         return results
+
+    def _save_text_pdf_fallback(self, text: str, output_path: Path):
+        """popdf が使えない場合に Qt で PDF を生成する。"""
+        from PySide6.QtGui import QPageSize, QPdfWriter, QTextDocument
+
+        writer = QPdfWriter(str(output_path))
+        writer.setPageSize(QPageSize(QPageSize.A4))
+        writer.setResolution(96)
+        document = QTextDocument()
+        escaped = (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\n", "<br>")
+        )
+        document.setHtml(
+            "<html><head><meta charset='utf-8'>"
+            "<style>body{font-family:'Yu Gothic UI','Meiryo',sans-serif;line-height:1.7;padding:20px;}</style>"
+            "</head><body>"
+            "<h2>Web 抽出結果</h2>"
+            f"<div>{escaped}</div>"
+            "</body></html>"
+        )
+        document.print_(writer)

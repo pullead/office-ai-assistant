@@ -53,7 +53,7 @@ class EmailTab(BaseTab):
         super().__init__(
             title="メール送信",
             subtitle="SMTP 設定を使って添付ファイル付きメールを送信します。",
-            icon="✉️",
+            icon="email",
         )
         self.config = Config()
         self.email_sender = None

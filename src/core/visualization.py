@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""データ可視化処理をまとめたモジュール。"""
+"""データ可視化処理。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class DataVisualizer:
         x_col: str | None = None,
         y_col: str | None = None,
     ) -> dict[str, Any]:
-        """ファイル種別に応じて可視化を生成する。"""
+        """可視化を生成してメタ情報を返す。"""
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"ファイルが見つかりません: {file_path}")
@@ -32,6 +32,7 @@ class DataVisualizer:
             return {
                 "kind": "image",
                 "output_path": image_path,
+                "preview_image_path": image_path,
                 "summary": self._build_wordcloud_summary(path, text),
                 "dataframe": None,
             }
@@ -42,10 +43,12 @@ class DataVisualizer:
 
         x_col, y_col = self._resolve_columns(dataframe, x_col, y_col)
         html_path = self._create_plotly_chart(dataframe, path.stem, mode, x_col, y_col)
+        preview_image_path = self._create_static_chart(dataframe, path.stem, mode, x_col, y_col)
 
         return {
             "kind": "html",
             "output_path": html_path,
+            "preview_image_path": preview_image_path,
             "summary": self._build_table_summary(path, dataframe, x_col, y_col, mode),
             "dataframe": dataframe,
             "x_col": x_col,
@@ -70,18 +73,7 @@ class DataVisualizer:
         if not cleaned_text:
             raise ValueError("ワードクラウド用のテキストが空です。")
 
-        stopwords = {
-            "こと",
-            "ため",
-            "これ",
-            "それ",
-            "です",
-            "ます",
-            "した",
-            "して",
-            "ある",
-            "いる",
-        }
+        stopwords = {"こと", "ため", "これ", "それ", "です", "ます", "した", "して", "ある", "いる"}
 
         wc = wordcloud_cls(
             font_path=self._get_japanese_font_path(),
@@ -96,41 +88,21 @@ class DataVisualizer:
         ax.imshow(wc, interpolation="bilinear")
         ax.axis("off")
         plt.tight_layout()
-
         return self._save_figure(fig, output_name)
 
     def _create_plotly_chart(self, dataframe, source_name: str, mode: str, x_col: str, y_col: str) -> str:
-        """Plotly のインタラクティブな HTML を生成する。"""
+        """Plotly のインタラクティブ HTML を生成する。"""
         _plt, _pd, _wordcloud, plotly = self._load_dependencies()
 
         df = dataframe.copy()
         df[x_col] = df[x_col].astype(str)
 
         if mode == "bar":
-            fig = plotly.bar(
-                df,
-                x=x_col,
-                y=y_col,
-                color=y_col,
-                text_auto=".2s",
-                title=f"{source_name} | 棒グラフ",
-            )
+            fig = plotly.bar(df, x=x_col, y=y_col, color=y_col, text_auto=".2s", title=f"{source_name} | 棒グラフ")
         elif mode == "line":
-            fig = plotly.line(
-                df,
-                x=x_col,
-                y=y_col,
-                markers=True,
-                title=f"{source_name} | 折れ線グラフ",
-            )
+            fig = plotly.line(df, x=x_col, y=y_col, markers=True, title=f"{source_name} | 折れ線グラフ")
         elif mode == "pie":
-            fig = plotly.pie(
-                df,
-                names=x_col,
-                values=y_col,
-                hole=0.35,
-                title=f"{source_name} | 円グラフ",
-            )
+            fig = plotly.pie(df, names=x_col, values=y_col, hole=0.35, title=f"{source_name} | 円グラフ")
         else:
             raise ValueError("未対応の可視化モードです。")
 
@@ -166,12 +138,42 @@ class DataVisualizer:
                 "box-shadow:0 18px 48px rgba(15,23,42,.10);}"
                 ".note{margin:0 0 12px 0;color:#475569;font-size:14px;}"
                 "</style></head><body><div class='card'>"
-                "<p class='note'>マウスオーバーで詳細値を確認できます。拡大・縮小や凡例クリックにも対応しています。</p>"
+                "<p class='note'>マウスオーバーで詳細確認、凡例クリックで表示切替、ホイールで拡大縮小が可能です。</p>"
                 f"{html_body}</div></body></html>"
             ),
             encoding="utf-8",
         )
         return str(html_path)
+
+    def _create_static_chart(self, dataframe, source_name: str, mode: str, x_col: str, y_col: str) -> str:
+        """PDF 用の静的グラフ画像を生成する。"""
+        plt, _pd, _wordcloud, _plotly = self._load_dependencies()
+
+        df = dataframe.copy()
+        fig, ax = plt.subplots(figsize=(12, 7))
+        if mode == "bar":
+            ax.bar(df[x_col].astype(str), df[y_col], color="#0f766e")
+            ax.set_title(f"{source_name} | 棒グラフ")
+        elif mode == "line":
+            ax.plot(df[x_col].astype(str), df[y_col], marker="o", linewidth=2, color="#1d4ed8")
+            ax.set_title(f"{source_name} | 折れ線グラフ")
+        elif mode == "pie":
+            ax.pie(
+                df[y_col],
+                labels=df[x_col].astype(str),
+                autopct="%1.1f%%",
+                startangle=90,
+            )
+            ax.set_title(f"{source_name} | 円グラフ")
+        else:
+            raise ValueError("未対応の可視化モードです。")
+
+        if mode in {"bar", "line"}:
+            ax.set_xlabel(x_col)
+            ax.set_ylabel(y_col)
+            plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        return self._save_figure(fig, f"{source_name}_{mode}.png")
 
     def _build_table_summary(self, path: Path, dataframe, x_col: str, y_col: str, mode: str) -> str:
         """グラフ用の要約文を作る。"""
@@ -201,7 +203,7 @@ class DataVisualizer:
         tokens = self._tokenize(text)
         top_tokens = self._top_tokens(tokens)
         lines = [
-            f"可視化モード: ワードクラウド",
+            "可視化モード: ワードクラウド",
             f"対象ファイル: {path}",
             f"文字数: {len(text)}",
             f"抽出語数: {len(tokens)}",
@@ -216,23 +218,18 @@ class DataVisualizer:
         suffix = path.suffix.lower()
         if suffix == ".txt":
             return self._read_text_with_fallback(path)
-        if suffix == ".csv":
-            dataframe = self.load_table(path)
-            return " ".join(dataframe.astype(str).fillna("").values.flatten())
-        if suffix in {".xlsx", ".xls"}:
+        if suffix in {".csv", ".xlsx", ".xls"}:
             dataframe = self.load_table(path)
             return " ".join(dataframe.astype(str).fillna("").values.flatten())
         raise ValueError("ワードクラウドは TXT / CSV / Excel のみ対応しています。")
 
     def _read_csv_with_fallback(self, path: Path, pd_module):
-        """CSV を文字コードの候補を切り替えながら読み込む。"""
+        """CSV を文字コード候補を切り替えながら読み込む。"""
         encodings = ("utf-8-sig", "utf-8", "cp932", "shift_jis", "latin-1")
         last_error = None
         for encoding in encodings:
             try:
                 return pd_module.read_csv(path, encoding=encoding)
-            except UnicodeDecodeError as error:
-                last_error = error
             except Exception as error:
                 last_error = error
         raise ValueError(f"CSV の読み込みに失敗しました: {last_error}") from last_error
@@ -259,10 +256,8 @@ class DataVisualizer:
             if not numeric_columns:
                 raise ValueError("数値列が見つからないため、グラフを生成できません。")
             second_col = str(numeric_columns[0])
-
         if first_col not in dataframe.columns or second_col not in dataframe.columns:
             raise ValueError("指定された列名がデータ内に存在しません。")
-
         return first_col, second_col
 
     def _save_figure(self, fig, output_name: str) -> str:
@@ -289,7 +284,7 @@ class DataVisualizer:
         return None
 
     def _tokenize(self, text: str) -> list[str]:
-        """簡易的な単語抽出を行う。"""
+        """簡易トークン抽出を行う。"""
         import re
 
         return re.findall(r"[A-Za-z0-9_\u3041-\u30ff\u4e00-\u9fff]{2,}", text)

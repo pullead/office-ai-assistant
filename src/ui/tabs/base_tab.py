@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""各タブ共通のベース UI。"""
+"""共通タブ UI。"""
+
+from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 
@@ -34,10 +36,15 @@ class BaseTab(QWidget):
         header.setSpacing(12)
 
         if icon:
-            icon_label = QLabel(icon)
-            icon_label.setFont(QFont("Segoe UI Emoji", 26))
-            icon_label.setFixedWidth(44)
+            icon_label = QLabel()
+            icon_label.setFixedSize(44, 44)
             icon_label.setAlignment(Qt.AlignCenter)
+            pixmap = self._load_header_icon(icon)
+            if pixmap is not None:
+                icon_label.setPixmap(pixmap.scaled(36, 36, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                icon_label.setText(icon[:2].upper())
+                icon_label.setFont(QFont("Yu Gothic UI", 15, QFont.Bold))
             header.addWidget(icon_label)
 
         title_col = QVBoxLayout()
@@ -64,6 +71,17 @@ class BaseTab(QWidget):
         self.card_layout.setContentsMargins(24, 20, 24, 20)
         self.card_layout.setSpacing(14)
         content_layout.addWidget(self.card, 1)
+
+    def _load_header_icon(self, icon_key: str) -> QPixmap | None:
+        """タブ見出しのアイコン画像を読み込む。"""
+        icon_name = icon_key.lower().strip()
+        icon_path = Path("src/ui/resources/icons") / f"{icon_name}.png"
+        if not icon_path.exists():
+            return None
+        pixmap = QPixmap(str(icon_path))
+        if pixmap.isNull():
+            return None
+        return pixmap
 
 
 def make_section_label(text: str) -> QLabel:
