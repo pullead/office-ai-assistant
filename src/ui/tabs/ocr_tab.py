@@ -27,6 +27,7 @@ from src.core.ocr_engine import InvoiceRecognizer
 from src.ui.tabs.base_tab import BaseTab, make_section_label
 from src.ui.widgets.api_settings import show_api_settings_dialog
 from src.ui.widgets.rich_result_panel import RichResultPanel
+from src.utils.i18n import I18n
 
 
 class OCRWorker(QThread):
@@ -47,9 +48,13 @@ class OCRWorker(QThread):
         try:
             text = self.recognizer.image_to_text(self.image_path)
             invoice_info = self.recognizer.extract_invoice_info(self.image_path)
+            document_analysis = self.recognizer.analyze_document(self.image_path)
             archive_info = None
+            rpa_export = None
             if self.mode == "archive":
                 archive_info = self.recognizer.archive_ocr_result(self.image_path)
+            elif self.mode == "rpa":
+                rpa_export = self.recognizer.export_rpa_payload(self.image_path)
 
             api_html = None
             api_error = None
@@ -58,6 +63,7 @@ class OCRWorker(QThread):
                     "以下の OCR 結果を、帳票レビュー向けに整理してください。"
                     "抽出値の妥当性チェック、確認ポイント、次アクションを含めてください。\n\n"
                     f"抽出項目:\n{json.dumps(invoice_info, ensure_ascii=False, indent=2)}\n\n"
+                    f"文書解析:\n{json.dumps(document_analysis, ensure_ascii=False, indent=2)}\n\n"
                     f"OCR 全文:\n{text}"
                 )
                 try:
@@ -71,7 +77,9 @@ class OCRWorker(QThread):
                     "image_path": self.image_path,
                     "text": text,
                     "invoice_info": invoice_info,
+                    "document_analysis": document_analysis,
                     "archive_info": archive_info,
+                    "rpa_export": rpa_export,
                     "api_html": api_html,
                     "api_error": api_error,
                 }
@@ -84,9 +92,10 @@ class OCRTab(BaseTab):
     """OCR と帳票解析を行うタブ。"""
 
     def __init__(self):
+        self.i18n = I18n()
         super().__init__(
-            title="OCR 認識",
-            subtitle="全文 OCR、請求書/領収書解析、整理保存までを見やすいレポートで表示します。",
+            title=self._text("title"),
+            subtitle=self._text("subtitle"),
             icon="ocr",
         )
         self.ocr_engine = InvoiceRecognizer(lang="jpn+eng")
@@ -97,6 +106,7 @@ class OCRTab(BaseTab):
         self._setup_content()
 
     def _setup_content(self):
+        self.set_header_tag(self._text("header_tag"))
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
 
@@ -105,56 +115,70 @@ class OCRTab(BaseTab):
         controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.setSpacing(14)
 
-        controls_layout.addWidget(make_section_label("画像ファイル"))
+        self.image_section_label = make_section_label(self._text("image_section"))
+        controls_layout.addWidget(self.image_section_label)
         row = QHBoxLayout()
-        self.select_btn = QPushButton("画像を選択")
+        self.select_btn = QPushButton(self._text("select_image"))
         self.select_btn.setObjectName("SecondaryButton")
         self.select_btn.setMinimumHeight(40)
         self.select_btn.clicked.connect(self._select_image)
         row.addWidget(self.select_btn)
 
-        self.file_label = QLabel("未選択")
+        self.file_label = QLabel(self._text("not_selected"))
         self.file_label.setObjectName("PageSubtitle")
         row.addWidget(self.file_label, 1)
         controls_layout.addLayout(row)
 
         api_row = QHBoxLayout()
-        self.use_api_box = QCheckBox("OCR 結果を AI API で再分析する")
+        self.use_api_box = QCheckBox(self._text("use_api"))
         self.use_api_box.setChecked(self.llm_client.is_enabled())
         api_row.addWidget(self.use_api_box)
 
-        self.api_settings_btn = QPushButton("API 設定")
+        self.api_settings_btn = QPushButton(self._text("api_settings"))
         self.api_settings_btn.setObjectName("ToolButton")
         self.api_settings_btn.clicked.connect(lambda: show_api_settings_dialog(self))
         api_row.addWidget(self.api_settings_btn)
         api_row.addStretch()
         controls_layout.addLayout(api_row)
 
-        controls_layout.addWidget(make_section_label("実行メニュー"))
-        self.ocr_btn = QPushButton("全文 OCR")
+        self.flow_section_label = make_section_label(self._text("flow_section"))
+        controls_layout.addWidget(self.flow_section_label)
+        self.ocr_btn = QPushButton(self._text("full_ocr"))
         self.ocr_btn.setObjectName("PrimaryButton")
         self.ocr_btn.setMinimumHeight(42)
         self.ocr_btn.clicked.connect(lambda: self._start("text"))
         controls_layout.addWidget(self.ocr_btn)
 
-        self.invoice_btn = QPushButton("請求書 / 領収書 解析")
+        self.invoice_btn = QPushButton(self._text("fixed_form"))
         self.invoice_btn.setObjectName("SecondaryButton")
         self.invoice_btn.setMinimumHeight(42)
         self.invoice_btn.clicked.connect(lambda: self._start("invoice"))
         controls_layout.addWidget(self.invoice_btn)
 
-        self.archive_btn = QPushButton("OCR 結果を整理保存")
+        self.flex_btn = QPushButton(self._text("flex_form"))
+        self.flex_btn.setObjectName("SecondaryButton")
+        self.flex_btn.setMinimumHeight(42)
+        self.flex_btn.clicked.connect(lambda: self._start("flex"))
+        controls_layout.addWidget(self.flex_btn)
+
+        self.archive_btn = QPushButton(self._text("archive"))
         self.archive_btn.setObjectName("ToolButton")
         self.archive_btn.setMinimumHeight(42)
         self.archive_btn.clicked.connect(lambda: self._start("archive"))
         controls_layout.addWidget(self.archive_btn)
 
-        self.copy_btn = QPushButton("結果をコピー")
+        self.rpa_btn = QPushButton(self._text("rpa_export"))
+        self.rpa_btn.setObjectName("ToolButton")
+        self.rpa_btn.setMinimumHeight(42)
+        self.rpa_btn.clicked.connect(lambda: self._start("rpa"))
+        controls_layout.addWidget(self.rpa_btn)
+
+        self.copy_btn = QPushButton(self._text("copy"))
         self.copy_btn.setObjectName("ToolButton")
         self.copy_btn.clicked.connect(self._copy_result)
         controls_layout.addWidget(self.copy_btn)
 
-        self.open_pdf_btn = QPushButton("PDF レポートを開く")
+        self.open_pdf_btn = QPushButton(self._text("open_pdf"))
         self.open_pdf_btn.setObjectName("ToolButton")
         self.open_pdf_btn.setEnabled(False)
         self.open_pdf_btn.clicked.connect(self._open_pdf)
@@ -166,7 +190,7 @@ class OCRTab(BaseTab):
         self.progress_bar.setFixedHeight(6)
         controls_layout.addWidget(self.progress_bar)
 
-        info = QLabel("OCR は複数パターンで認識し、帳票解析では請求番号、金額、日付、発行元、宛先を抽出します。")
+        info = QLabel(self._text("info_panel"))
         info.setObjectName("InfoPanel")
         info.setWordWrap(True)
         controls_layout.addWidget(info)
@@ -176,7 +200,8 @@ class OCRTab(BaseTab):
         result_layout = QVBoxLayout(result_wrapper)
         result_layout.setContentsMargins(0, 0, 0, 0)
         result_layout.setSpacing(10)
-        result_layout.addWidget(make_section_label("OCR レポート"))
+        self.report_section_label = make_section_label(self._text("report_section"))
+        result_layout.addWidget(self.report_section_label)
 
         self.result_panel = RichResultPanel()
         result_layout.addWidget(self.result_panel)
@@ -190,7 +215,7 @@ class OCRTab(BaseTab):
         """画像を選択する。"""
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "画像を選択",
+            self._text("select_image_dialog"),
             "",
             "画像ファイル (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)",
         )
@@ -202,7 +227,7 @@ class OCRTab(BaseTab):
     def _start(self, mode: str):
         """OCR 処理を開始する。"""
         if not self.current_path:
-            QMessageBox.warning(self, "入力確認", "先に画像ファイルを選択してください。")
+            QMessageBox.warning(self, self._text("input_check"), self._text("need_image"))
             return
 
         self._set_buttons(False)
@@ -225,15 +250,16 @@ class OCRTab(BaseTab):
         self.last_pdf_path = self._export_pdf_report(payload, html)
         self.open_pdf_btn.setEnabled(bool(self.last_pdf_path))
 
+        file_preview_paths = []
         if payload.get("archive_info"):
             archive_info = payload["archive_info"]
-            self.result_panel.show_files(
-                [
-                    archive_info["image_path"],
-                    archive_info["text_path"],
-                    archive_info["json_path"],
-                ]
+            file_preview_paths.extend(
+                [archive_info["image_path"], archive_info["text_path"], archive_info["json_path"]]
             )
+        if payload.get("rpa_export"):
+            file_preview_paths.append(payload["rpa_export"]["json_path"])
+        if file_preview_paths:
+            self.result_panel.show_files(file_preview_paths)
         else:
             self.result_panel.show_image(payload["image_path"])
 
@@ -247,10 +273,13 @@ class OCRTab(BaseTab):
     def _build_report_html(self, payload: dict) -> str:
         """OCR 結果を HTML レポート化する。"""
         info = payload["invoice_info"] or {}
+        document_analysis = payload.get("document_analysis") or {}
         validation = info.get("validation") or {}
         checks = validation.get("checks") or []
         layout_info = info.get("layout_info") or {}
         table_regions = layout_info.get("table_regions") or []
+        automation_points = document_analysis.get("automation_points") or []
+        key_values = document_analysis.get("key_values") or []
 
         text = self._escape_html(payload["text"]).replace("\n", "<br>")
         archive_html = ""
@@ -263,6 +292,13 @@ class OCRTab(BaseTab):
                 f"{self._table_row('画像', saved['image_path'])}"
                 f"{self._table_row('全文テキスト', saved['text_path'])}"
                 f"{self._table_row('解析 JSON', saved['json_path'])}"
+                "</table>"
+            )
+        if payload.get("rpa_export"):
+            archive_html += (
+                "<h3>RPA 連携 JSON</h3>"
+                "<table style='width:100%;border-collapse:collapse;margin-bottom:8px;'>"
+                f"{self._table_row('JSON 保存先', payload['rpa_export']['json_path'])}"
                 "</table>"
             )
 
@@ -301,9 +337,31 @@ class OCRTab(BaseTab):
                 "<td style='border:1px solid #e7dcc7;padding:6px;'>検証情報がありません。</td></tr>"
             )
 
+        key_value_lines = []
+        for row in key_values[:8]:
+            key_value_lines.append(
+                "<tr>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'>{self._escape_html(row.get('key', ''))}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{self._escape_html(row.get('value', ''))}</td>"
+                "</tr>"
+            )
+        if not key_value_lines:
+            key_value_lines.append(
+                "<tr><td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'>項目</td>"
+                "<td style='border:1px solid #e7dcc7;padding:6px;'>候補なし</td></tr>"
+            )
+
+        automation_html = "".join(
+            f"<li>{self._escape_html(point)}</li>" for point in automation_points
+        ) or "<li>自動化候補はありません。</li>"
+
         return (
             "<div style='font-family:Yu Gothic UI,Meiryo,sans-serif;color:#1f2937;'>"
             "<h2>OCR 解析結果</h2>"
+            "<table style='width:100%;border-collapse:collapse;margin-bottom:10px;'>"
+            f"{self._table_row('帳票形式', document_analysis.get('format_type') or info.get('format_type') or '未判定')}"
+            f"{self._table_row('文書カテゴリ', document_analysis.get('document_kind') or info.get('document_kind') or '一般文書')}"
+            "</table>"
             "<h3>抽出フィールド</h3>"
             "<table style='width:100%;border-collapse:collapse;margin-bottom:10px;'>"
             f"{self._table_row('帳票種別', info.get('document_type') or '未判定')}"
@@ -333,6 +391,16 @@ class OCRTab(BaseTab):
             "</tr>"
             + "".join(check_lines) +
             "</table>"
+            "<h3>非定型文書のキー/値候補</h3>"
+            "<table style='width:100%;border-collapse:collapse;margin-bottom:12px;'>"
+            "<tr>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>キー</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>値</b></td>"
+            "</tr>"
+            + "".join(key_value_lines) +
+            "</table>"
+            "<h3>RPA 連携ポイント</h3>"
+            f"<ul>{automation_html}</ul>"
             f"{archive_html}"
             "<h3>OCR 全文</h3>"
             f"<div style='background:#fffdf8;border:1px solid #eadfce;border-radius:18px;padding:16px;line-height:1.7;'>{text}</div>"
@@ -374,7 +442,9 @@ class OCRTab(BaseTab):
             self.select_btn,
             self.ocr_btn,
             self.invoice_btn,
+            self.flex_btn,
             self.archive_btn,
+            self.rpa_btn,
             self.api_settings_btn,
             self.open_pdf_btn,
         ):
@@ -437,3 +507,79 @@ class OCRTab(BaseTab):
             self.worker.terminate()
             self.worker.wait()
         event.accept()
+
+    def _text(self, key: str) -> str:
+        """現在言語向けの文言を返す。"""
+        lang = self.i18n.get_current_language()
+        texts = {
+            "ja": {
+                "title": "AI-OCR ワークスペース",
+                "subtitle": "定型帳票と非定型文書の両方を読み取り、検証・保存・RPA 連携まで一画面で扱います。",
+                "header_tag": "帳票 / 非定型 / RPA",
+                "image_section": "入力イメージ",
+                "select_image": "画像を選択",
+                "not_selected": "未選択",
+                "use_api": "OCR 結果を AI API で再分析する",
+                "api_settings": "API 設定",
+                "flow_section": "解析フロー",
+                "full_ocr": "全文 OCR",
+                "fixed_form": "定型帳票を解析",
+                "flex_form": "非定型文書を解析",
+                "archive": "OCR 結果を整理保存",
+                "rpa_export": "RPA JSON を出力",
+                "copy": "結果をコピー",
+                "open_pdf": "PDF レポートを開く",
+                "info_panel": "AI-OCR は複数パターンの文字認識、表領域候補の検出、フィールド検証、RPA 連携用 JSON の生成まで行います。",
+                "report_section": "OCR レポート",
+                "select_image_dialog": "画像を選択",
+                "input_check": "入力確認",
+                "need_image": "先に画像ファイルを選択してください。",
+            },
+            "en": {
+                "title": "AI OCR Workspace",
+                "subtitle": "Read both structured forms and unstructured documents, then validate, archive, and hand off to RPA in one screen.",
+                "header_tag": "Forms / Flex / RPA",
+                "image_section": "Input Image",
+                "select_image": "Select Image",
+                "not_selected": "No file selected",
+                "use_api": "Enhance OCR results with AI API",
+                "api_settings": "API Settings",
+                "flow_section": "Processing Flow",
+                "full_ocr": "Full OCR",
+                "fixed_form": "Analyze Structured Form",
+                "flex_form": "Analyze Unstructured Document",
+                "archive": "Archive OCR Result",
+                "rpa_export": "Export RPA JSON",
+                "copy": "Copy Result",
+                "open_pdf": "Open PDF Report",
+                "info_panel": "AI OCR runs multi-pass recognition, detects table regions, validates fields, and prepares JSON for RPA automation.",
+                "report_section": "OCR Report",
+                "select_image_dialog": "Select Image",
+                "input_check": "Input Check",
+                "need_image": "Please select an image first.",
+            },
+            "zh": {
+                "title": "AI-OCR 工作台",
+                "subtitle": "同时支持定型单据与非定型文档识别，并在同一界面完成校验、归档和 RPA 交接。",
+                "header_tag": "单据 / 非定型 / RPA",
+                "image_section": "输入图像",
+                "select_image": "选择图片",
+                "not_selected": "未选择",
+                "use_api": "使用 AI API 深度分析 OCR 结果",
+                "api_settings": "API 设置",
+                "flow_section": "处理流程",
+                "full_ocr": "全文 OCR",
+                "fixed_form": "解析定型单据",
+                "flex_form": "解析非定型文档",
+                "archive": "整理保存 OCR 结果",
+                "rpa_export": "导出 RPA JSON",
+                "copy": "复制结果",
+                "open_pdf": "打开 PDF 报告",
+                "info_panel": "AI-OCR 会进行多轮识别、表格区域检测、字段校验，并生成可供 RPA 接管的 JSON 数据。",
+                "report_section": "OCR 报告",
+                "select_image_dialog": "选择图片",
+                "input_check": "输入检查",
+                "need_image": "请先选择图片文件。",
+            },
+        }
+        return texts.get(lang, texts["ja"]).get(key, texts["ja"][key])

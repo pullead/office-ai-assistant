@@ -8,7 +8,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QDir, QSortFilterProxyModel, QThread, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
+    QFrame,
     QFileDialog,
     QFileSystemModel,
     QHBoxLayout,
@@ -139,6 +141,28 @@ class FileWorker(QThread):
             elif self.operation == "duplicate":
                 text = self.manager.find_duplicate_files(directory)
                 payload = {"title": "重複ファイル検出", "text": text, "files": []}
+            elif self.operation == "space_lens":
+                report = self.manager.build_space_lens_report(directory)
+                payload = {
+                    "title": "スペースレンズ",
+                    "space_lens": report,
+                    "files": [item["path"] for item in report["largest_items"]],
+                }
+            elif self.operation == "large_old":
+                rows = self.manager.find_large_old_files(
+                    directory,
+                    min_size_mb=self.kwargs.get("min_size_mb", 100),
+                    older_than_days=self.kwargs.get("older_than_days", 180),
+                )
+                payload = {
+                    "title": "大型・旧ファイル",
+                    "large_old": rows,
+                    "files": [item["path"] for item in rows],
+                    "text": f"{len(rows)} 件の候補を抽出しました。",
+                }
+            elif self.operation == "shred":
+                text = self.manager.shred_files(self.kwargs.get("paths", []), passes=self.kwargs.get("passes", 1))
+                payload = {"title": "シュレッダー", "text": text, "files": []}
             else:
                 raise ValueError("未対応の処理です。")
             self.finished.emit(payload)
@@ -167,9 +191,54 @@ class FileTab(BaseTab):
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
 
-        controls = QWidget()
+        rail = QFrame()
+        rail.setObjectName("WorkspaceNav")
+        rail.setFixedWidth(200)
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(14, 16, 14, 16)
+        rail_layout.setSpacing(12)
+
+        rail_layout.addWidget(make_section_label("File Modes"))
+        for title, hint in (
+            ("Space Lens", "容量の大きい項目を俯瞰表示"),
+            ("大型 / 旧ファイル", "整理候補をすばやく抽出"),
+            ("検索 / 分類", "名前・内容・種類で探索"),
+            ("シュレッダー", "選択項目を安全に削除"),
+        ):
+            card = QFrame()
+            card.setObjectName("WorkspaceNavCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 12, 12, 12)
+            card_layout.setSpacing(4)
+            title_label = QLabel(title)
+            title_label.setObjectName("WorkspaceNavTitle")
+            hint_label = QLabel(hint)
+            hint_label.setObjectName("WorkspaceNavHint")
+            hint_label.setWordWrap(True)
+            card_layout.addWidget(title_label)
+            card_layout.addWidget(hint_label)
+            rail_layout.addWidget(card)
+
+        self.rail_space_btn = QPushButton("Space Lens 可視化")
+        self.rail_space_btn.setObjectName("PrimaryButton")
+        self.rail_space_btn.clicked.connect(lambda: self._start_simple("space_lens"))
+        rail_layout.addWidget(self.rail_space_btn)
+
+        self.rail_summary_btn = QPushButton("フォルダ分析")
+        self.rail_summary_btn.setObjectName("SecondaryButton")
+        self.rail_summary_btn.clicked.connect(lambda: self._start_simple("summary"))
+        rail_layout.addWidget(self.rail_summary_btn)
+
+        self.rail_search_btn = QPushButton("ファイル名検索")
+        self.rail_search_btn.setObjectName("ToolButton")
+        self.rail_search_btn.clicked.connect(self._search_name)
+        rail_layout.addWidget(self.rail_search_btn)
+        rail_layout.addStretch()
+
+        controls = QFrame()
+        controls.setObjectName("WorkspacePanel")
         controls_layout = QVBoxLayout(controls)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setContentsMargins(18, 18, 18, 18)
         controls_layout.setSpacing(14)
 
         controls_layout.addWidget(make_section_label("対象フォルダ"))
@@ -210,6 +279,35 @@ class FileTab(BaseTab):
         self.duplicate_btn.setMinimumHeight(42)
         self.duplicate_btn.clicked.connect(lambda: self._start_simple("duplicate"))
         controls_layout.addWidget(self.duplicate_btn)
+
+        controls_layout.addWidget(make_section_label("CleanUp モード"))
+        self.space_lens_btn = QPushButton("Space Lens 可視化")
+        self.space_lens_btn.setObjectName("PrimaryButton")
+        self.space_lens_btn.setMinimumHeight(42)
+        self.space_lens_btn.clicked.connect(lambda: self._start_simple("space_lens"))
+        controls_layout.addWidget(self.space_lens_btn)
+
+        cleanup_row = QHBoxLayout()
+        self.large_file_mb = QLineEdit()
+        self.large_file_mb.setPlaceholderText("大型MB")
+        cleanup_row.addWidget(self.large_file_mb)
+
+        self.old_file_days = QLineEdit()
+        self.old_file_days.setPlaceholderText("未使用日数")
+        cleanup_row.addWidget(self.old_file_days)
+        controls_layout.addLayout(cleanup_row)
+
+        self.large_old_btn = QPushButton("大型・旧ファイル抽出")
+        self.large_old_btn.setObjectName("SecondaryButton")
+        self.large_old_btn.setMinimumHeight(42)
+        self.large_old_btn.clicked.connect(self._scan_large_old_files)
+        controls_layout.addWidget(self.large_old_btn)
+
+        self.shred_btn = QPushButton("選択項目をシュレッダー")
+        self.shred_btn.setObjectName("ToolButton")
+        self.shred_btn.setMinimumHeight(42)
+        self.shred_btn.clicked.connect(self._shred_selected_files)
+        controls_layout.addWidget(self.shred_btn)
 
         controls_layout.addWidget(make_section_label("一括リネーム"))
         rename_row = QHBoxLayout()
@@ -252,20 +350,19 @@ class FileTab(BaseTab):
         controls_layout.addWidget(self.progress_bar)
         controls_layout.addStretch()
 
-        right_splitter = QSplitter(Qt.Vertical)
-        right_splitter.setChildrenCollapsible(False)
-
-        report_wrapper = QWidget()
+        report_wrapper = QFrame()
+        report_wrapper.setObjectName("WorkspaceFloat")
         report_layout = QVBoxLayout(report_wrapper)
-        report_layout.setContentsMargins(0, 0, 0, 0)
+        report_layout.setContentsMargins(18, 18, 18, 18)
         report_layout.setSpacing(10)
         report_layout.addWidget(make_section_label("ファイル管理レポート"))
         self.result_panel = RichResultPanel()
         report_layout.addWidget(self.result_panel)
 
-        explorer_wrapper = QWidget()
+        explorer_wrapper = QFrame()
+        explorer_wrapper.setObjectName("WorkspacePanel")
         explorer_layout = QVBoxLayout(explorer_wrapper)
-        explorer_layout.setContentsMargins(0, 0, 0, 0)
+        explorer_layout.setContentsMargins(18, 18, 18, 18)
         explorer_layout.setSpacing(8)
         explorer_layout.addWidget(make_section_label("ツリー表示（エクスプローラー）"))
 
@@ -325,18 +422,22 @@ class FileTab(BaseTab):
 
         explorer_layout.addWidget(make_section_label("検索結果一覧"))
         self.search_result_list = QListWidget()
+        self.search_result_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.search_result_list.setMinimumHeight(140)
         self.search_result_list.itemClicked.connect(self._focus_selected_result)
         self.search_result_list.itemDoubleClicked.connect(self._open_selected_result)
         explorer_layout.addWidget(self.search_result_list)
 
-        right_splitter.addWidget(report_wrapper)
-        right_splitter.addWidget(explorer_wrapper)
-        right_splitter.setSizes([430, 260])
+        center_splitter = QSplitter(Qt.Vertical)
+        center_splitter.setChildrenCollapsible(False)
+        center_splitter.addWidget(controls)
+        center_splitter.addWidget(explorer_wrapper)
+        center_splitter.setSizes([360, 420])
 
-        splitter.addWidget(controls)
-        splitter.addWidget(right_splitter)
-        splitter.setSizes([390, 920])
+        splitter.addWidget(rail)
+        splitter.addWidget(center_splitter)
+        splitter.addWidget(report_wrapper)
+        splitter.setSizes([190, 640, 470])
         self.card_layout.addWidget(splitter, 1)
 
     def _select_dir(self):
@@ -421,6 +522,20 @@ class FileTab(BaseTab):
             return None
         return int(mb * 1024 * 1024)
 
+    def _parse_positive_int(self, text: str, fallback: int, label: str) -> int:
+        """正の整数を安全に解釈する。"""
+        if not text:
+            return fallback
+        try:
+            value = int(text)
+        except ValueError:
+            QMessageBox.warning(self, "入力確認", f"{label}は整数で入力してください。")
+            return fallback
+        if value <= 0:
+            QMessageBox.warning(self, "入力確認", f"{label}は1以上で入力してください。")
+            return fallback
+        return value
+
     def _start_worker(self, operation: str, **kwargs):
         """処理ワーカーを起動する。"""
         self._set_buttons(False)
@@ -463,6 +578,36 @@ class FileTab(BaseTab):
             return
         self._start_worker("rename", directory=self.current_dir, pattern=pattern, replacement=replacement)
 
+    def _scan_large_old_files(self):
+        """大型かつ長期間未使用のファイルを抽出する。"""
+        if not self._check_dir():
+            return
+        min_size_mb = self._parse_positive_int(self.large_file_mb.text().strip(), 100, "大型ファイルしきい値")
+        older_than_days = self._parse_positive_int(self.old_file_days.text().strip(), 180, "未使用日数")
+        self._start_worker(
+            "large_old",
+            directory=self.current_dir,
+            min_size_mb=min_size_mb,
+            older_than_days=older_than_days,
+        )
+
+    def _shred_selected_files(self):
+        """選択中ファイルを完全削除する。"""
+        selected_items = self.search_result_list.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "入力確認", "シュレッダー対象として検索結果一覧からファイルを選択してください。")
+            return
+        paths = [item.text() for item in selected_items]
+        reply = QMessageBox.question(
+            self,
+            "最終確認",
+            f"選択した {len(paths)} 件を完全削除します。この操作は元に戻せません。\n\n続行しますか？",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._start_worker("shred", directory=self.current_dir, paths=paths, passes=1)
+
     def _search_name(self):
         """ファイル名検索を実行する。"""
         if not self._check_dir():
@@ -486,6 +631,28 @@ class FileTab(BaseTab):
     def _on_done(self, payload: dict):
         """処理完了時の表示を更新する。"""
         self.search_result_list.clear()
+        if "space_lens" in payload:
+            report = payload["space_lens"]
+            self.result_panel.set_report_html(self._build_space_lens_html(report))
+            if report.get("html_path"):
+                self.result_panel.show_html_file(report["html_path"])
+            else:
+                self.result_panel.show_files([item["path"] for item in report["largest_items"]])
+            for path in self._filter_file_list_for_active_filters(payload.get("files", []))[:200]:
+                self.search_result_list.addItem(path)
+            return
+
+        if "large_old" in payload:
+            rows = payload["large_old"]
+            self.result_panel.set_report_html(self._build_large_old_html(rows))
+            if rows:
+                self.result_panel.show_files([item["path"] for item in rows[:300]])
+                for item in rows[:300]:
+                    self.search_result_list.addItem(item["path"])
+            else:
+                self.result_panel.show_text_preview("条件に一致する大型・旧ファイルは見つかりませんでした。")
+            return
+
         if "report" in payload:
             report = payload["report"]
             self.result_panel.set_report_html(self._build_report_html(report))
@@ -592,6 +759,69 @@ class FileTab(BaseTab):
             "</div>"
         )
 
+    def _build_space_lens_html(self, report: dict) -> str:
+        """Space Lens の要約 HTML を返す。"""
+        rows = []
+        for item in report.get("summary_rows", [])[:12]:
+            rows.append(
+                "<tr>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'>{self._escape_html(item['name'])}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{self._format_size(item['size'])}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{item['items']}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{self._escape_html(item['kind'])}</td>"
+                "</tr>"
+            )
+        return (
+            "<div style='font-family:Yu Gothic UI,Meiryo,sans-serif;color:#1f2937;'>"
+            "<h2>スペースレンズ</h2>"
+            "<p>容量マップを生成し、上位容量項目を俯瞰表示します。</p>"
+            "<table style='width:100%;border-collapse:collapse;margin-bottom:10px;'>"
+            f"{self._table_row('対象フォルダ', report.get('directory', ''))}"
+            f"{self._table_row('総容量', self._format_size(report.get('total_size', 0)))}"
+            f"{self._table_row('集計項目数', str(report.get('items', 0)))}"
+            "</table>"
+            "<table style='width:100%;border-collapse:collapse;'>"
+            "<tr>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>項目</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>サイズ</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>件数</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>種別</b></td>"
+            "</tr>"
+            + "".join(rows)
+            + "</table></div>"
+        )
+
+    def _build_large_old_html(self, rows: list[dict]) -> str:
+        """大型・旧ファイル一覧の HTML を返す。"""
+        body_rows = []
+        for item in rows[:30]:
+            body_rows.append(
+                "<tr>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'>{self._escape_html(Path(item['path']).name)}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{self._format_size(item['size'])}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{item['last_access_days']} 日前</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{item['last_modified_days']} 日前</td>"
+                "</tr>"
+            )
+        if not body_rows:
+            body_rows.append(
+                "<tr><td colspan='4' style='border:1px solid #e7dcc7;padding:8px;'>条件に一致する候補はありません。</td></tr>"
+            )
+        return (
+            "<div style='font-family:Yu Gothic UI,Meiryo,sans-serif;color:#1f2937;'>"
+            "<h2>大型・旧ファイル</h2>"
+            "<p>容量が大きく、長期間アクセスされていないファイル候補です。</p>"
+            "<table style='width:100%;border-collapse:collapse;'>"
+            "<tr>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>ファイル</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>サイズ</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>最終アクセス</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>最終更新</b></td>"
+            "</tr>"
+            + "".join(body_rows)
+            + "</table></div>"
+        )
+
     def _table_row(self, title: str, value: str) -> str:
         """レポート用の2列テーブル行を返す。"""
         return (
@@ -665,6 +895,12 @@ class FileTab(BaseTab):
             self.summary_btn,
             self.organize_btn,
             self.duplicate_btn,
+            self.space_lens_btn,
+            self.rail_space_btn,
+            self.rail_summary_btn,
+            self.rail_search_btn,
+            self.large_old_btn,
+            self.shred_btn,
             self.rename_btn,
             self.search_name_btn,
             self.search_content_btn,
@@ -676,6 +912,8 @@ class FileTab(BaseTab):
         self.min_size_edit.setEnabled(enabled)
         self.max_size_edit.setEnabled(enabled)
         self.modified_filter_combo.setEnabled(enabled)
+        self.large_file_mb.setEnabled(enabled)
+        self.old_file_days.setEnabled(enabled)
 
     def _reset_ui(self, *_args):
         """処理終了後に UI を戻す。"""

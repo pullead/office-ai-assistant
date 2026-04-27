@@ -17,7 +17,7 @@ class BaseTab(QWidget):
 
     def _build_base(self, title: str, subtitle: str, icon: str):
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 20, 24, 20)
+        outer.setContentsMargins(24, 22, 24, 22)
         outer.setSpacing(0)
 
         scroll = QScrollArea()
@@ -30,45 +30,61 @@ class BaseTab(QWidget):
 
         content_layout = QVBoxLayout(container)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(16)
+        content_layout.setSpacing(18)
+
+        self.header_frame = QFrame()
+        self.header_frame.setObjectName("PageHero")
+        header_frame_layout = QHBoxLayout(self.header_frame)
+        header_frame_layout.setContentsMargins(20, 18, 20, 18)
+        header_frame_layout.setSpacing(14)
 
         header = QHBoxLayout()
         header.setSpacing(12)
 
         if icon:
-            icon_label = QLabel()
-            icon_label.setFixedSize(44, 44)
-            icon_label.setAlignment(Qt.AlignCenter)
+            self.icon_label = QLabel()
+            self.icon_label.setObjectName("PageHeroIcon")
+            self.icon_label.setFixedSize(52, 52)
+            self.icon_label.setAlignment(Qt.AlignCenter)
             pixmap = self._load_header_icon(icon)
             if pixmap is not None:
-                icon_label.setPixmap(pixmap.scaled(36, 36, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                self.icon_label.setPixmap(
+                    pixmap.scaled(36, 36, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
             else:
-                icon_label.setText(icon[:2].upper())
-                icon_label.setFont(QFont("Yu Gothic UI", 15, QFont.Bold))
-            header.addWidget(icon_label)
+                self.icon_label.setText(icon[:2].upper())
+                self.icon_label.setFont(QFont("Yu Gothic UI", 15, QFont.Bold))
+            header.addWidget(self.icon_label)
 
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
 
-        title_label = QLabel(title)
-        title_label.setObjectName("PageTitle")
-        title_label.setFont(QFont("Meiryo", 16, QFont.Bold))
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("PageTitle")
+        self.title_label.setFont(QFont("Meiryo", 16, QFont.Bold))
 
-        subtitle_label = QLabel(subtitle)
-        subtitle_label.setObjectName("PageSubtitle")
-        subtitle_label.setFont(QFont("Meiryo", 10))
-        subtitle_label.setWordWrap(True)
+        self.subtitle_label = QLabel(subtitle)
+        self.subtitle_label.setObjectName("PageSubtitle")
+        self.subtitle_label.setFont(QFont("Meiryo", 10))
+        self.subtitle_label.setWordWrap(True)
 
-        title_col.addWidget(title_label)
-        title_col.addWidget(subtitle_label)
+        title_col.addWidget(self.title_label)
+        title_col.addWidget(self.subtitle_label)
         header.addLayout(title_col)
         header.addStretch()
-        content_layout.addLayout(header)
+
+        self.header_tag = QLabel()
+        self.header_tag.setObjectName("PageHeroTag")
+        self.header_tag.setVisible(False)
+        header.addWidget(self.header_tag, 0, Qt.AlignTop)
+
+        header_frame_layout.addLayout(header)
+        content_layout.addWidget(self.header_frame)
 
         self.card = QFrame()
         self.card.setObjectName("CardFrame")
         self.card_layout = QVBoxLayout(self.card)
-        self.card_layout.setContentsMargins(24, 20, 24, 20)
+        self.card_layout.setContentsMargins(24, 22, 24, 22)
         self.card_layout.setSpacing(14)
         content_layout.addWidget(self.card, 1)
 
@@ -82,6 +98,16 @@ class BaseTab(QWidget):
         if pixmap.isNull():
             return None
         return pixmap
+
+    def set_header_texts(self, title: str, subtitle: str):
+        """ヘッダー文言を更新する。"""
+        self.title_label.setText(title)
+        self.subtitle_label.setText(subtitle)
+
+    def set_header_tag(self, text: str = ""):
+        """右上タグを更新する。"""
+        self.header_tag.setVisible(bool(text))
+        self.header_tag.setText(text)
 
 
 def make_section_label(text: str) -> QLabel:

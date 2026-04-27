@@ -3,22 +3,22 @@
    ============================================================ */
 
 QMainWindow[theme="light"] {
-    background-color: #f5f1e8;
+    background-color: #eef2ff;
     color: #1f2937;
     font-family: "Yu Gothic UI", "Meiryo", sans-serif;
 }
 
 QMainWindow[theme="light"] #Sidebar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #162330, stop:1 #223548);
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
+        stop:0 #3f1c8f, stop:0.52 #5d2bbb, stop:1 #0e3f78);
+    border-right: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 QMainWindow[theme="light"] #SidebarHero,
 QMainWindow[theme="light"] #SidebarFooterCard {
-    background-color: rgba(255, 253, 248, 0.08);
-    border: 1px solid rgba(255, 253, 248, 0.10);
-    border-radius: 18px;
+    background-color: rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 22px;
 }
 
 QMainWindow[theme="light"] #SidebarHeroTitle {
@@ -89,13 +89,64 @@ QMainWindow[theme="light"] #ContentStack {
 
 QMainWindow[theme="light"] #CardFrame,
 QMainWindow[theme="light"] #MetricCard {
-    background-color: #fffdf8;
-    border-radius: 22px;
-    border: 1px solid #eadfce;
+    background-color: rgba(255, 255, 255, 0.84);
+    border-radius: 26px;
+    border: 1px solid rgba(146, 163, 255, 0.22);
 }
 
 QMainWindow[theme="light"] #MetricCard {
     min-width: 170px;
+}
+
+QMainWindow[theme="light"] #WorkspaceNav,
+QMainWindow[theme="light"] #WorkspacePanel,
+QMainWindow[theme="light"] #WorkspaceFloat {
+    background-color: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(146, 163, 255, 0.22);
+    border-radius: 22px;
+}
+
+QMainWindow[theme="light"] #WorkspaceNavCard {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(107,72,243,0.10), stop:1 rgba(37,208,193,0.08));
+    border: 1px solid rgba(120, 120, 255, 0.16);
+    border-radius: 18px;
+}
+
+QMainWindow[theme="light"] #WorkspaceNavTitle {
+    color: #4531a8;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QMainWindow[theme="light"] #WorkspaceNavHint {
+    color: #5f6b85;
+    font-size: 11px;
+}
+
+QMainWindow[theme="light"] #PageHero {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(255,255,255,0.92), stop:1 rgba(232,240,255,0.88));
+    border: 1px solid rgba(157, 178, 255, 0.32);
+    border-radius: 26px;
+}
+
+QMainWindow[theme="light"] #PageHeroIcon {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #25d0c1, stop:1 #6a48f3);
+    border: 1px solid rgba(255,255,255,0.4);
+    border-radius: 18px;
+    color: #ffffff;
+}
+
+QMainWindow[theme="light"] #PageHeroTag {
+    background-color: rgba(99, 102, 241, 0.10);
+    color: #5b34d6;
+    border: 1px solid rgba(99, 102, 241, 0.18);
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 700;
 }
 
 QMainWindow[theme="light"] #MetricTitle {
@@ -148,11 +199,14 @@ QMainWindow[theme="light"] QLabel {
 QMainWindow[theme="light"] QLineEdit,
 QMainWindow[theme="light"] QTextEdit,
 QMainWindow[theme="light"] QPlainTextEdit,
+QMainWindow[theme="light"] QTextBrowser,
 QMainWindow[theme="light"] QListWidget,
+QMainWindow[theme="light"] QTreeView,
+QMainWindow[theme="light"] QTableWidget,
 QMainWindow[theme="light"] QComboBox {
-    background-color: #fffaf2;
+    background-color: rgba(255, 255, 255, 0.92);
     color: #1f2937;
-    border: 1.5px solid #eadfce;
+    border: 1.5px solid #d6dbff;
     border-radius: 14px;
     padding: 10px 14px;
     font-size: 13px;
@@ -163,6 +217,9 @@ QMainWindow[theme="light"] QComboBox {
 QMainWindow[theme="light"] QLineEdit:focus,
 QMainWindow[theme="light"] QTextEdit:focus,
 QMainWindow[theme="light"] QPlainTextEdit:focus,
+QMainWindow[theme="light"] QTextBrowser:focus,
+QMainWindow[theme="light"] QTreeView:focus,
+QMainWindow[theme="light"] QTableWidget:focus,
 QMainWindow[theme="light"] QComboBox:focus {
     border: 1.5px solid #0f766e;
     background-color: #ffffff;
@@ -201,9 +258,24 @@ QMainWindow[theme="light"] QListWidget::item:selected {
     color: #9a3412;
 }
 
+QMainWindow[theme="light"] QTreeView::item:selected,
+QMainWindow[theme="light"] QTableWidget::item:selected {
+    background-color: #fff7ed;
+    color: #9a3412;
+}
+
+QMainWindow[theme="light"] QHeaderView::section {
+    background-color: #f8f5ef;
+    color: #4b5563;
+    border: none;
+    border-bottom: 1px solid #eadfce;
+    padding: 8px 10px;
+    font-weight: 700;
+}
+
 QMainWindow[theme="light"] QPushButton#PrimaryButton {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #0f766e, stop:1 #115e59);
+        stop:0 #6a48f3, stop:1 #ef5da8);
     color: #fffdf8;
     border: none;
     padding: 12px 20px;
@@ -214,7 +286,7 @@ QMainWindow[theme="light"] QPushButton#PrimaryButton {
 
 QMainWindow[theme="light"] QPushButton#PrimaryButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #0d9488, stop:1 #0f766e);
+        stop:0 #7e61f4, stop:1 #f472b6);
 }
 
 QMainWindow[theme="light"] QPushButton#PrimaryButton:disabled {
@@ -223,9 +295,9 @@ QMainWindow[theme="light"] QPushButton#PrimaryButton:disabled {
 }
 
 QMainWindow[theme="light"] QPushButton#SecondaryButton {
-    background-color: #fff7ed;
-    color: #9a3412;
-    border: 1.5px solid #fdba74;
+    background-color: rgba(110, 86, 255, 0.08);
+    color: #5b34d6;
+    border: 1.5px solid rgba(110, 86, 255, 0.22);
     padding: 11px 18px;
     border-radius: 14px;
     font-size: 13px;
@@ -233,7 +305,7 @@ QMainWindow[theme="light"] QPushButton#SecondaryButton {
 }
 
 QMainWindow[theme="light"] QPushButton#SecondaryButton:hover {
-    background-color: #ffedd5;
+    background-color: rgba(110, 86, 255, 0.14);
 }
 
 QMainWindow[theme="light"] QPushButton#ToolButton {
@@ -384,22 +456,22 @@ QMainWindow[theme="light"] QScrollBar::sub-line {
    ============================================================ */
 
 QMainWindow[theme="dark"] {
-    background-color: #0c151d;
+    background-color: #09101c;
     color: #e5ecf3;
     font-family: "Yu Gothic UI", "Meiryo", sans-serif;
 }
 
 QMainWindow[theme="dark"] #Sidebar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #081018, stop:1 #122130);
+        stop:0 #18082f, stop:0.55 #3a1877, stop:1 #083458);
     border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 QMainWindow[theme="dark"] #SidebarHero,
 QMainWindow[theme="dark"] #SidebarFooterCard {
-    background-color: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 18px;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 22px;
 }
 
 QMainWindow[theme="dark"] #SidebarHeroTitle,
@@ -463,9 +535,60 @@ QMainWindow[theme="dark"] QPushButton#ThemeToggle:hover {
 
 QMainWindow[theme="dark"] #CardFrame,
 QMainWindow[theme="dark"] #MetricCard {
-    background-color: #13202c;
+    background-color: rgba(14, 20, 34, 0.84);
+    border-radius: 26px;
+    border: 1px solid rgba(87, 108, 182, 0.28);
+}
+
+QMainWindow[theme="dark"] #WorkspaceNav,
+QMainWindow[theme="dark"] #WorkspacePanel,
+QMainWindow[theme="dark"] #WorkspaceFloat {
+    background-color: rgba(18, 24, 42, 0.82);
+    border: 1px solid rgba(87, 108, 182, 0.28);
     border-radius: 22px;
-    border: 1px solid #223141;
+}
+
+QMainWindow[theme="dark"] #WorkspaceNavCard {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(106,72,243,0.16), stop:1 rgba(18,184,176,0.10));
+    border: 1px solid rgba(125, 89, 255, 0.18);
+    border-radius: 18px;
+}
+
+QMainWindow[theme="dark"] #WorkspaceNavTitle {
+    color: #d8cbff;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QMainWindow[theme="dark"] #WorkspaceNavHint {
+    color: #aab7da;
+    font-size: 11px;
+}
+
+QMainWindow[theme="dark"] #PageHero {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(31,37,62,0.94), stop:1 rgba(16,28,52,0.92));
+    border: 1px solid rgba(101, 123, 212, 0.24);
+    border-radius: 26px;
+}
+
+QMainWindow[theme="dark"] #PageHeroIcon {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #12b8b0, stop:1 #7b48f7);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 18px;
+    color: #ffffff;
+}
+
+QMainWindow[theme="dark"] #PageHeroTag {
+    background-color: rgba(125, 89, 255, 0.12);
+    color: #d4c5ff;
+    border: 1px solid rgba(125, 89, 255, 0.22);
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 700;
 }
 
 QMainWindow[theme="dark"] #MetricTitle {
@@ -512,11 +635,14 @@ QMainWindow[theme="dark"] #SectionLabel {
 QMainWindow[theme="dark"] QLineEdit,
 QMainWindow[theme="dark"] QTextEdit,
 QMainWindow[theme="dark"] QPlainTextEdit,
+QMainWindow[theme="dark"] QTextBrowser,
 QMainWindow[theme="dark"] QListWidget,
+QMainWindow[theme="dark"] QTreeView,
+QMainWindow[theme="dark"] QTableWidget,
 QMainWindow[theme="dark"] QComboBox {
-    background-color: #0d1720;
+    background-color: rgba(9, 16, 29, 0.92);
     color: #e5ecf3;
-    border: 1.5px solid #223141;
+    border: 1.5px solid #2b345a;
     border-radius: 14px;
     padding: 10px 14px;
     font-size: 13px;
@@ -527,6 +653,9 @@ QMainWindow[theme="dark"] QComboBox {
 QMainWindow[theme="dark"] QLineEdit:focus,
 QMainWindow[theme="dark"] QTextEdit:focus,
 QMainWindow[theme="dark"] QPlainTextEdit:focus,
+QMainWindow[theme="dark"] QTextBrowser:focus,
+QMainWindow[theme="dark"] QTreeView:focus,
+QMainWindow[theme="dark"] QTableWidget:focus,
 QMainWindow[theme="dark"] QComboBox:focus {
     border: 1.5px solid #0f766e;
 }
@@ -563,9 +692,24 @@ QMainWindow[theme="dark"] QListWidget::item:selected {
     color: #a7f3d0;
 }
 
+QMainWindow[theme="dark"] QTreeView::item:selected,
+QMainWindow[theme="dark"] QTableWidget::item:selected {
+    background-color: #143a36;
+    color: #a7f3d0;
+}
+
+QMainWindow[theme="dark"] QHeaderView::section {
+    background-color: #162531;
+    color: #c9d8e6;
+    border: none;
+    border-bottom: 1px solid #223141;
+    padding: 8px 10px;
+    font-weight: 700;
+}
+
 QMainWindow[theme="dark"] QPushButton#PrimaryButton {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #0f766e, stop:1 #0d9488);
+        stop:0 #6a48f3, stop:1 #ef5da8);
     color: #fffdf8;
     border: none;
     padding: 12px 20px;
@@ -576,13 +720,13 @@ QMainWindow[theme="dark"] QPushButton#PrimaryButton {
 
 QMainWindow[theme="dark"] QPushButton#PrimaryButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #14b8a6, stop:1 #0f766e);
+        stop:0 #8162fa, stop:1 #ff78bf);
 }
 
 QMainWindow[theme="dark"] QPushButton#SecondaryButton {
-    background-color: #2e2116;
-    color: #fdba74;
-    border: 1.5px solid #9a3412;
+    background-color: rgba(103, 86, 255, 0.10);
+    color: #cabdff;
+    border: 1.5px solid rgba(122, 102, 255, 0.30);
     padding: 11px 18px;
     border-radius: 14px;
     font-size: 13px;
@@ -590,7 +734,7 @@ QMainWindow[theme="dark"] QPushButton#SecondaryButton {
 }
 
 QMainWindow[theme="dark"] QPushButton#SecondaryButton:hover {
-    background-color: #40291a;
+    background-color: rgba(103, 86, 255, 0.18);
 }
 
 QMainWindow[theme="dark"] QPushButton#ToolButton {

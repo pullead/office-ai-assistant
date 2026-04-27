@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -161,6 +163,111 @@ class FileManager:
         }
 
     @staticmethod
+    def build_space_lens_report(directory: str, output_dir: str | None = None, max_items: int = 180) -> dict:
+        """Space Lens 向けの容量可視化データを返す。"""
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"ディレクトリが見つかりません: {directory}")
+
+        nodes = []
+        summary_rows = []
+        for child in sorted(dir_path.iterdir(), key=lambda item: item.name.lower()):
+            try:
+                if child.is_dir():
+                    size = FileManager._calculate_directory_size(child)
+                    count = sum(1 for entry in child.rglob("*") if entry.is_file())
+                else:
+                    size = child.stat().st_size
+                    count = 1
+            except OSError:
+                continue
+            nodes.append(
+                {
+                    "path": str(child),
+                    "name": child.name,
+                    "size": size,
+                    "items": count,
+                    "kind": "folder" if child.is_dir() else "file",
+                }
+            )
+
+        nodes.sort(key=lambda item: item["size"], reverse=True)
+        visible_nodes = nodes[:max_items]
+        for item in visible_nodes[:25]:
+            summary_rows.append(
+                {
+                    "name": item["name"],
+                    "path": item["path"],
+                    "size": item["size"],
+                    "items": item["items"],
+                    "kind": item["kind"],
+                }
+            )
+
+        html_path = FileManager._create_space_lens_html(dir_path, visible_nodes, output_dir)
+        return {
+            "directory": str(dir_path),
+            "total_size": sum(item["size"] for item in nodes),
+            "items": len(nodes),
+            "summary_rows": summary_rows,
+            "largest_items": visible_nodes[:20],
+            "html_path": html_path,
+        }
+
+    @staticmethod
+    def find_large_old_files(
+        directory: str,
+        min_size_mb: int = 100,
+        older_than_days: int = 180,
+        limit: int = 200,
+    ) -> list[dict]:
+        """大容量かつ古いファイルを抽出する。"""
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            return []
+
+        threshold_size = min_size_mb * 1024 * 1024
+        threshold_time = time.time() - older_than_days * 24 * 60 * 60
+        results = []
+        for path in dir_path.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            if stat.st_size < threshold_size or stat.st_atime > threshold_time:
+                continue
+            results.append(
+                {
+                    "path": str(path),
+                    "size": stat.st_size,
+                    "last_access_days": int((time.time() - stat.st_atime) // (24 * 60 * 60)),
+                    "last_modified_days": int((time.time() - stat.st_mtime) // (24 * 60 * 60)),
+                }
+            )
+        results.sort(key=lambda item: (item["size"], item["last_access_days"]), reverse=True)
+        return results[:limit]
+
+    @staticmethod
+    def shred_files(paths: list[str], passes: int = 1) -> str:
+        """ファイルを上書き後に削除する。"""
+        shredded = 0
+        skipped = 0
+        for raw_path in paths:
+            path = Path(raw_path)
+            if not path.exists() or not path.is_file():
+                skipped += 1
+                continue
+            try:
+                FileManager._overwrite_file(path, passes=passes)
+                path.unlink()
+                shredded += 1
+            except OSError:
+                skipped += 1
+        return f"完全削除: {shredded} 件 / スキップ: {skipped} 件"
+
+    @staticmethod
     def find_duplicate_files(directory: str) -> str:
         """内容が同じ重複ファイルを検出する。"""
         dir_path = Path(directory)
@@ -232,6 +339,126 @@ class FileManager:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 hasher.update(chunk)
         return hasher.hexdigest()
+
+    @staticmethod
+    def _calculate_directory_size(path: Path) -> int:
+        """ディレクトリ配下の総サイズを返す。"""
+        total = 0
+        for child in path.rglob("*"):
+            if child.is_file():
+                try:
+                    total += child.stat().st_size
+                except OSError:
+                    continue
+        return total
+
+    @staticmethod
+    def _create_space_lens_html(root: Path, nodes: list[dict], output_dir: str | None) -> str | None:
+        """容量マップ HTML を生成する。"""
+        if not nodes:
+            return None
+        try:
+            import plotly.express as px
+        except ModuleNotFoundError:
+            return None
+
+        labels = []
+        parents = []
+        values = []
+        custom = []
+
+        root_label = root.name or str(root)
+        labels.append(root_label)
+        parents.append("")
+        values.append(sum(item["size"] for item in nodes))
+        custom.append(f"{len(nodes)} 項目")
+
+        for item in nodes:
+            labels.append(item["name"])
+            parents.append(root_label)
+            values.append(item["size"])
+            custom.append(f"{item['items']} 項目 / {item['kind']}")
+
+        figure = px.treemap(
+            names=labels,
+            parents=parents,
+            values=values,
+            custom_data=custom,
+            color=values,
+            color_continuous_scale=["#6ee7f9", "#60a5fa", "#8b5cf6", "#ec4899"],
+        )
+        figure.update_traces(
+            root_color="#2b1d59",
+            textinfo="label+value",
+            hovertemplate="名前: %{label}<br>サイズ: %{value}<br>%{customdata}<extra></extra>",
+        )
+        figure.update_layout(
+            paper_bgcolor="#140d26",
+            plot_bgcolor="#140d26",
+            margin={"l": 12, "r": 12, "t": 20, "b": 12},
+            font={"family": "Yu Gothic UI, Meiryo, sans-serif", "color": "#f8fafc"},
+            coloraxis_showscale=False,
+        )
+
+        target_dir = Path(output_dir) if output_dir else Path("output") / "space_lens"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        output_path = target_dir / f"{root_label}_space_lens.html"
+        html_body = figure.to_html(include_plotlyjs="cdn", full_html=False)
+        output_path.write_text(
+            (
+                "<!DOCTYPE html><html lang='ja'><head><meta charset='utf-8'>"
+                "<title>Space Lens</title>"
+                "<style>"
+                "body{margin:0;padding:18px;background:radial-gradient(circle at top,#2c165c,#12081f 62%,#09050f);"
+                "font-family:'Yu Gothic UI','Meiryo',sans-serif;color:#f8fafc;}"
+                ".shell{display:grid;grid-template-columns:360px 1fr;gap:18px;min-height:92vh;}"
+                ".panel,.map{background:rgba(255,255,255,0.08);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.12);"
+                "border-radius:28px;box-shadow:0 20px 60px rgba(0,0,0,0.25);}"
+                ".panel{padding:20px;}.panel h1{font-size:22px;margin:0 0 14px 0;}"
+                ".metric{padding:14px 16px;border-radius:18px;background:rgba(255,255,255,0.06);margin-bottom:10px;}"
+                ".item{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:14px;"
+                "background:rgba(255,255,255,0.04);margin-bottom:8px;transition:transform .18s ease,background .18s ease;}"
+                ".item:hover{transform:translateX(4px);background:rgba(255,255,255,0.09);}"
+                ".map{padding:12px;}"
+                "</style></head><body>"
+                "<div class='shell'>"
+                "<section class='panel'>"
+                f"<h1>スペースレンズ</h1>"
+                f"<div class='metric'>対象: {root}</div>"
+                f"<div class='metric'>表示項目数: {len(nodes)}</div>"
+                f"<div class='metric'>総容量: {FileManager._format_size(sum(item['size'] for item in nodes))}</div>"
+                + "".join(
+                    (
+                        "<div class='item'>"
+                        f"<span>{item['name']}</span>"
+                        f"<span>{FileManager._format_size(item['size'])}</span>"
+                        "</div>"
+                    )
+                    for item in nodes[:18]
+                )
+                + "</section><section class='map'>"
+                f"{html_body}</section></div></body></html>"
+            ),
+            encoding="utf-8",
+        )
+        return str(output_path)
+
+    @staticmethod
+    def _overwrite_file(path: Path, passes: int = 1):
+        """ファイルを乱数で上書きする。"""
+        size = path.stat().st_size
+        if size <= 0:
+            return
+        chunk_size = 1024 * 1024
+        with open(path, "r+b") as handle:
+            for _ in range(max(1, passes)):
+                handle.seek(0)
+                remaining = size
+                while remaining > 0:
+                    write_size = min(chunk_size, remaining)
+                    handle.write(os.urandom(write_size))
+                    remaining -= write_size
+                handle.flush()
 
     @staticmethod
     def _read_text_with_fallback(path: Path) -> str:
