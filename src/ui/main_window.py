@@ -177,6 +177,42 @@ TAB_TRANSLATIONS = {
         "フィルタ適用": "Apply Filters",
         "フィルタ解除": "Clear Filters",
         "検索結果一覧": "Search Results",
+        "AI Flow": "AI Flow",
+        "1. 入力を集める": "1. Gather Input",
+        "テキスト / URL / ファイル": "Text / URL / File",
+        "2. モードを選ぶ": "2. Choose Mode",
+        "要約 / TODO / 異常値": "Summary / TODO / Anomaly",
+        "3. レポート化": "3. Build Report",
+        "PDF とプレビューを生成": "Generate PDF and preview",
+        "Chart Flow": "Chart Flow",
+        "1. データ選択": "1. Select Data",
+        "CSV / Excel / テキスト": "CSV / Excel / Text",
+        "2. グラフ生成": "2. Build Chart",
+        "棒 / 折れ線 / 円 / 雲": "Bar / Line / Pie / Cloud",
+        "3. PDF 出力": "3. Export PDF",
+        "AI 解説付きで保存": "Save with AI commentary",
+        "Web Flow": "Web Flow",
+        "1. URL 入力": "1. Enter URL",
+        "記事 / ページ / 資料": "Article / Page / Document",
+        "2. 抽出と保存": "2. Extract and Save",
+        "本文 / PDF / テキスト": "Text / PDF / Plain Text",
+        "3. AI 整理": "3. AI Organize",
+        "要約と確認ポイント": "Summary and checkpoints",
+        "Mail Flow": "Mail Flow",
+        "1. 受信を読む": "1. Read Mail",
+        "EML / TXT / 手動貼り付け": "EML / TXT / Manual paste",
+        "2. AI で返信を作る": "2. Draft with AI",
+        "分析 / 草案 / 改稿": "Analyze / Draft / Refine",
+        "3. SMTP で送る": "3. Send by SMTP",
+        "添付ファイルにも対応": "Supports attachments",
+        "File Modes": "File Modes",
+        "容量の大きい項目を俯瞰表示": "View large storage items",
+        "大型 / 旧ファイル": "Large / Old Files",
+        "整理候補をすばやく抽出": "Find cleanup candidates quickly",
+        "検索 / 分類": "Search / Classify",
+        "名前・内容・種類で探索": "Explore by name, content, and type",
+        "シュレッダー": "Shredder",
+        "選択項目を安全に削除": "Safely delete selected items",
     },
     "zh": {
         "クイックコマンド": "快捷指令",
@@ -259,6 +295,42 @@ TAB_TRANSLATIONS = {
         "ファイル管理レポート": "文件管理报告",
         "ツリー表示（エクスプローラー）": "树状视图（资源管理器）",
         "検索結果一覧": "搜索结果列表",
+        "AI Flow": "AI 流程",
+        "1. 入力を集める": "1. 收集输入",
+        "テキスト / URL / ファイル": "文本 / URL / 文件",
+        "2. モードを選ぶ": "2. 选择模式",
+        "要約 / TODO / 異常値": "摘要 / TODO / 异常值",
+        "3. レポート化": "3. 生成报告",
+        "PDF とプレビューを生成": "生成 PDF 和预览",
+        "Chart Flow": "图表流程",
+        "1. データ選択": "1. 选择数据",
+        "CSV / Excel / テキスト": "CSV / Excel / 文本",
+        "2. グラフ生成": "2. 生成图表",
+        "棒 / 折れ線 / 円 / 雲": "柱状 / 折线 / 饼图 / 词云",
+        "3. PDF 出力": "3. 导出 PDF",
+        "AI 解説付きで保存": "附带 AI 解读保存",
+        "Web Flow": "网页流程",
+        "1. URL 入力": "1. 输入 URL",
+        "記事 / ページ / 資料": "文章 / 页面 / 资料",
+        "2. 抽出と保存": "2. 提取并保存",
+        "本文 / PDF / テキスト": "正文 / PDF / 文本",
+        "3. AI 整理": "3. AI 整理",
+        "要約と確認ポイント": "摘要和确认点",
+        "Mail Flow": "邮件流程",
+        "1. 受信を読む": "1. 阅读来信",
+        "EML / TXT / 手動貼り付け": "EML / TXT / 手动粘贴",
+        "2. AI で返信を作る": "2. 用 AI 写回复",
+        "分析 / 草案 / 改稿": "分析 / 草稿 / 修改",
+        "3. SMTP で送る": "3. 通过 SMTP 发送",
+        "添付ファイルにも対応": "支持附件",
+        "File Modes": "文件模式",
+        "容量の大きい項目を俯瞰表示": "俯瞰查看大容量项目",
+        "大型 / 旧ファイル": "大文件 / 旧文件",
+        "整理候補をすばやく抽出": "快速提取整理候选",
+        "検索 / 分類": "搜索 / 分类",
+        "名前・内容・種類で探索": "按名称、内容和类型查找",
+        "シュレッダー": "文件粉碎机",
+        "選択項目を安全に削除": "安全删除选中项目",
     },
 }
 
@@ -323,11 +395,12 @@ class SidebarButton(QPushButton):
         super().__init__(parent)
         self.setObjectName("SidebarButton")
         self.setCheckable(True)
+        self.setAutoExclusive(True)
         self.setMinimumHeight(60)
         self.setFont(QFont("Yu Gothic UI", 11))
         self.setIcon(icon)
-        self.setIconSize(QSize(30, 30))
-        self.setText(f"  {text}")
+        self.setIconSize(QSize(28, 28))
+        self.setText(text)
         self.setToolTip(text)
         self.setCursor(Qt.PointingHandCursor)
 
@@ -546,24 +619,24 @@ class MainWindow(QMainWindow):
 
     def _rebuild_tabs(self, current_key: str):
         """現在言語向けにタブを再生成する。"""
-        try:
-            new_tabs = {
-                "ai": AITab(),
-                "ocr": OCRTab(),
-                "viz": VizTab(),
-                "web": WebTab(),
-                "email": EmailTab(),
-                "file": FileTab(),
-            }
-            for tab in new_tabs.values():
+        builders = {
+            "ai": AITab,
+            "ocr": OCRTab,
+            "viz": VizTab,
+            "web": WebTab,
+            "email": EmailTab,
+            "file": FileTab,
+        }
+        new_tabs = {}
+        errors = []
+        for key, builder in builders.items():
+            try:
+                tab = builder()
                 translate_widget_tree(tab, self.i18n.get_current_language())
-        except Exception as error:
-            QMessageBox.warning(
-                self,
-                self.i18n.get("warning"),
-                f"タブの再構築に失敗しました。\n{error}",
-            )
-            return
+                new_tabs[key] = tab
+            except Exception as error:
+                errors.append((key, str(error)))
+                new_tabs[key] = self._build_error_tab(key, str(error))
 
         previous_widgets = [self.content_stack.widget(index) for index in range(self.content_stack.count())]
         for widget in previous_widgets:
@@ -580,6 +653,38 @@ class MainWindow(QMainWindow):
         keys = list(self.tabs.keys())
         for button_index, button in enumerate(self.nav_buttons):
             button.setChecked(keys[button_index] == current_key)
+        if errors:
+            detail = "\n".join(f"{key}: {message}" for key, message in errors)
+            QMessageBox.warning(
+                self,
+                self.i18n.get("warning"),
+                f"タブ再構築時に一部のページで問題が発生しました。\n{detail}",
+            )
+
+    def _build_error_tab(self, key: str, message: str) -> QWidget:
+        """生成に失敗したタブの代替表示を返す。"""
+        wrapper = QWidget()
+        layout = QVBoxLayout(wrapper)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(14)
+
+        title = QLabel(f"{key.upper()} | 読み込みエラー")
+        title.setObjectName("PageTitle")
+        detail = QLabel(
+            "このページの構築中にエラーが発生しました。"
+            " 他の機能は継続して利用できます。"
+        )
+        detail.setObjectName("PageSubtitle")
+        detail.setWordWrap(True)
+
+        body = QTextEdit()
+        body.setReadOnly(True)
+        body.setPlainText(message)
+
+        layout.addWidget(title)
+        layout.addWidget(detail)
+        layout.addWidget(body, 1)
+        return wrapper
 
     def _switch_to(self, key: str):
         """表示タブを切り替える。"""
@@ -614,7 +719,7 @@ class MainWindow(QMainWindow):
         self.nav_items = self._build_nav_items()
 
         for button, item in zip(self.nav_buttons, self.nav_items):
-            button.setText(f"  {item[2]}")
+            button.setText(item[2])
             button.setToolTip(item[2])
 
         self._refresh_sidebar_texts()

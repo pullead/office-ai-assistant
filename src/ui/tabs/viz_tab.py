@@ -12,6 +12,7 @@ from PySide6.QtGui import QPageSize, QPdfWriter
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFrame,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -89,9 +90,53 @@ class VizTab(BaseTab):
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
 
-        controls = QWidget()
+        rail = QFrame()
+        rail.setObjectName("WorkspaceNav")
+        rail.setFixedWidth(190)
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(14, 16, 14, 16)
+        rail_layout.setSpacing(12)
+        rail_layout.addWidget(make_section_label("Chart Flow"))
+        for title, hint in (
+            ("1. データ選択", "CSV / Excel / テキスト"),
+            ("2. グラフ生成", "棒 / 折れ線 / 円 / 雲"),
+            ("3. PDF 出力", "AI 解説付きで保存"),
+        ):
+            card = QFrame()
+            card.setObjectName("WorkspaceNavCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 12, 12, 12)
+            card_layout.setSpacing(4)
+            title_label = QLabel(title)
+            title_label.setObjectName("WorkspaceNavTitle")
+            hint_label = QLabel(hint)
+            hint_label.setObjectName("WorkspaceNavHint")
+            hint_label.setWordWrap(True)
+            card_layout.addWidget(title_label)
+            card_layout.addWidget(hint_label)
+            rail_layout.addWidget(card)
+
+        self.rail_select_btn = QPushButton("ファイルを選択")
+        self.rail_select_btn.setObjectName("SecondaryButton")
+        self.rail_select_btn.clicked.connect(self._select_file)
+        rail_layout.addWidget(self.rail_select_btn)
+
+        self.rail_generate_btn = QPushButton("生成する")
+        self.rail_generate_btn.setObjectName("PrimaryButton")
+        self.rail_generate_btn.clicked.connect(self._generate)
+        rail_layout.addWidget(self.rail_generate_btn)
+
+        self.rail_pdf_btn = QPushButton("PDF レポートを開く")
+        self.rail_pdf_btn.setObjectName("ToolButton")
+        self.rail_pdf_btn.setEnabled(False)
+        self.rail_pdf_btn.clicked.connect(self._open_pdf)
+        rail_layout.addWidget(self.rail_pdf_btn)
+        rail_layout.addStretch()
+
+        controls = QFrame()
+        controls.setObjectName("WorkspacePanel")
         controls_layout = QVBoxLayout(controls)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setContentsMargins(18, 18, 18, 18)
         controls_layout.setSpacing(14)
 
         controls_layout.addWidget(make_section_label("入力ファイル"))
@@ -162,18 +207,20 @@ class VizTab(BaseTab):
         controls_layout.addWidget(self.log_text)
         controls_layout.addStretch()
 
-        result_wrapper = QWidget()
+        result_wrapper = QFrame()
+        result_wrapper.setObjectName("WorkspaceFloat")
         result_layout = QVBoxLayout(result_wrapper)
-        result_layout.setContentsMargins(0, 0, 0, 0)
+        result_layout.setContentsMargins(18, 18, 18, 18)
         result_layout.setSpacing(10)
         result_layout.addWidget(make_section_label("可視化レポート"))
 
         self.result_panel = RichResultPanel()
         result_layout.addWidget(self.result_panel)
 
+        splitter.addWidget(rail)
         splitter.addWidget(controls)
         splitter.addWidget(result_wrapper)
-        splitter.setSizes([390, 920])
+        splitter.setSizes([190, 500, 640])
         self.card_layout.addWidget(splitter, 1)
 
     def _select_file(self):
@@ -236,6 +283,7 @@ class VizTab(BaseTab):
 
         self.last_pdf_path = self._export_pdf_report(payload, html)
         self.open_pdf_btn.setEnabled(bool(self.last_pdf_path))
+        self.rail_pdf_btn.setEnabled(bool(self.last_pdf_path))
         self.log_text.append(f"可視化出力: {payload['output_path']}")
         if payload.get("ai_comment"):
             self.log_text.append(f"AI 解説: {payload['ai_comment'][:220]}")
@@ -349,10 +397,14 @@ class VizTab(BaseTab):
         self.select_btn.setEnabled(enabled)
         self.run_btn.setEnabled(enabled)
         self.api_settings_btn.setEnabled(enabled)
+        self.rail_select_btn.setEnabled(enabled)
+        self.rail_generate_btn.setEnabled(enabled)
+        self.rail_pdf_btn.setEnabled(enabled and bool(self.last_pdf_path))
 
     def _reset_ui(self, *_args):
         """実行後の UI 状態を戻す。"""
         self._set_buttons(True)
+        self.rail_pdf_btn.setEnabled(bool(self.last_pdf_path))
         self.progress_bar.setVisible(False)
         self.worker = None
 

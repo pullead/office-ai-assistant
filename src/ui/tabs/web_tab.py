@@ -10,7 +10,9 @@ from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QPageSize, QPdfWriter, QTextDocument
 from PySide6.QtWidgets import (
     QCheckBox,
+    QFrame,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -94,9 +96,53 @@ class WebTab(BaseTab):
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
 
-        controls = QWidget()
+        rail = QFrame()
+        rail.setObjectName("WorkspaceNav")
+        rail.setFixedWidth(190)
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(14, 16, 14, 16)
+        rail_layout.setSpacing(12)
+        rail_layout.addWidget(make_section_label("Web Flow"))
+        for title, hint in (
+            ("1. URL 入力", "記事 / ページ / 資料"),
+            ("2. 抽出と保存", "本文 / PDF / テキスト"),
+            ("3. AI 整理", "要約と確認ポイント"),
+        ):
+            card = QFrame()
+            card.setObjectName("WorkspaceNavCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 12, 12, 12)
+            card_layout.setSpacing(4)
+            title_label = QLabel(title)
+            title_label.setObjectName("WorkspaceNavTitle")
+            hint_label = QLabel(hint)
+            hint_label.setObjectName("WorkspaceNavHint")
+            hint_label.setWordWrap(True)
+            card_layout.addWidget(title_label)
+            card_layout.addWidget(hint_label)
+            rail_layout.addWidget(card)
+
+        self.rail_extract_btn = QPushButton("本文を抽出")
+        self.rail_extract_btn.setObjectName("PrimaryButton")
+        self.rail_extract_btn.clicked.connect(lambda: self._start("text"))
+        rail_layout.addWidget(self.rail_extract_btn)
+
+        self.rail_pdf_btn = QPushButton("PDF 保存")
+        self.rail_pdf_btn.setObjectName("SecondaryButton")
+        self.rail_pdf_btn.clicked.connect(lambda: self._start("pdf"))
+        rail_layout.addWidget(self.rail_pdf_btn)
+
+        self.rail_open_report_btn = QPushButton("PDF レポートを開く")
+        self.rail_open_report_btn.setObjectName("ToolButton")
+        self.rail_open_report_btn.setEnabled(False)
+        self.rail_open_report_btn.clicked.connect(self._open_pdf)
+        rail_layout.addWidget(self.rail_open_report_btn)
+        rail_layout.addStretch()
+
+        controls = QFrame()
+        controls.setObjectName("WorkspacePanel")
         controls_layout = QVBoxLayout(controls)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setContentsMargins(18, 18, 18, 18)
         controls_layout.setSpacing(14)
 
         controls_layout.addWidget(make_section_label("URL"))
@@ -165,18 +211,20 @@ class WebTab(BaseTab):
         controls_layout.addWidget(hint)
         controls_layout.addStretch()
 
-        result_wrapper = QWidget()
+        result_wrapper = QFrame()
+        result_wrapper.setObjectName("WorkspaceFloat")
         result_layout = QVBoxLayout(result_wrapper)
-        result_layout.setContentsMargins(0, 0, 0, 0)
+        result_layout.setContentsMargins(18, 18, 18, 18)
         result_layout.setSpacing(10)
         result_layout.addWidget(make_section_label("抽出レポート"))
 
         self.result_panel = RichResultPanel()
         result_layout.addWidget(self.result_panel)
 
+        splitter.addWidget(rail)
         splitter.addWidget(controls)
         splitter.addWidget(result_wrapper)
-        splitter.setSizes([360, 940])
+        splitter.setSizes([190, 460, 680])
         self.card_layout.addWidget(splitter, 1)
 
     def _start(self, mode: str):
@@ -209,6 +257,7 @@ class WebTab(BaseTab):
         self.result_panel.show_text_preview(payload["text"][:20000])
         self.last_pdf_path = self._export_pdf_report(payload, html)
         self.open_pdf_btn.setEnabled(bool(self.last_pdf_path))
+        self.rail_open_report_btn.setEnabled(bool(self.last_pdf_path))
 
     def _on_error(self, message: str):
         """エラーを表示する。"""
@@ -266,13 +315,23 @@ class WebTab(BaseTab):
 
     def _set_buttons(self, enabled: bool):
         """ボタン状態を切り替える。"""
-        for button in (self.text_btn, self.pdf_btn, self.epub_btn, self.api_settings_btn, self.open_pdf_btn):
+        for button in (
+            self.text_btn,
+            self.pdf_btn,
+            self.epub_btn,
+            self.api_settings_btn,
+            self.rail_extract_btn,
+            self.rail_pdf_btn,
+        ):
             button.setEnabled(enabled)
+        self.open_pdf_btn.setEnabled(enabled and bool(self.last_pdf_path))
+        self.rail_open_report_btn.setEnabled(enabled and bool(self.last_pdf_path))
 
     def _reset_ui(self, *_args):
         """処理終了後の後始末を行う。"""
         self._set_buttons(True)
         self.open_pdf_btn.setEnabled(bool(self.last_pdf_path))
+        self.rail_open_report_btn.setEnabled(bool(self.last_pdf_path))
         self.progress_bar.setVisible(False)
         self.worker = None
 

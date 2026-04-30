@@ -1,179 +1,233 @@
-# Office AI アシスタント — 作品集
+# Office AI アシスタント
 
-## 🎯 プロジェクト概要
-`python-office` をベースに開発した、**オールインワン**のオフィス自動化ツールです。  
-OCR請求書認識・AIタスクアシスタント・データ可視化・Web抽出・メール自動送信など、実務で頻出する機能を**シンプルなGUI**で提供します。
-## ✨メイン画面
+Office AI アシスタントは、日常業務で使う **AI 分析 / OCR / データ可視化 / Web 抽出 / AI メール支援 / ファイル整理** を 1 つにまとめたデスクトップツールです。  
+PySide6 ベースの GUI で、レポート表示・PDF 出力・外部 AI API 連携・OCR 保存整理まで一連の作業をまとめて扱えます。
 
-| No. | スクリーンショット | 説明                    |
-|-----|-------------------|-----------------------|
-| 1 | ![画面1](img/img01.png) | アプリケーション全体のメイン画面      |
-| 2 | ![画面2](img/img02.png) | OCR認識タブ（画像ドロップ・請求書認識） |
-| 3 | ![画面3](img/img03.png) | データ可視化タブ（グラフ・ワードクラウド） |
-| 4 | ![画面4](img/img04.png) | ファイル検索                |
+## 主な特徴
 
-## ✨ 機能一覧
+- `AI ワークスペース`
+  - 要約、TODO 抽出、議事録整理、改善案生成、CSV / Excel 異常値確認、OCR 保管案の整理
+- `AI-OCR ワークスペース`
+  - 全文 OCR、帳票解析、非定型文書解析、RPA 向け JSON 出力、整理保存
+- `データ可視化`
+  - 棒グラフ、折れ線、円グラフ、ワードクラウド生成
+  - AI 解説付きレポートと PDF 出力
+- `Web 抽出`
+  - URL から本文抽出、テキスト保存、PDF 保存、AI 整理
+- `AI メールアシスタント`
+  - メール読解、返信案作成、文面修正、SMTP 送信
+- `ファイル整理`
+  - フォルダ分析、拡張子ごとの整理、重複検出、Space Lens 可視化
+  - パス入力移動、バッチリネーム、テンプレートファイル作成、ZIP / TAR 系アーカイブ一覧
+- `AI API 設定`
+  - 接続テスト、一括診断、プロバイダー切り替え
+  - OpenRouter / SiliconFlow / 各種互換 API に対応
 
-| タブ | 機能 | 使用ライブラリ | アピールポイント |
-|:---:|------|----------------|----------------------|
-| 🤖 | **AIアシスタント**<br>自然言語で「デスクトップを整理して」など実行 | `porobot`, `subprocess` | 自然言語処理の基礎・タスク自動化 |
-| 📄 | **OCR認識**<br>画像→テキスト変換<br>**請求書の自動認識**（番号・金額・日付） | `pytesseract`, `Pillow` | 画像処理・正規表現・構造化抽出 |
-| 📊 | **データ可視化**<br>Excel→グラフ<br>テキスト→ワードクラウド | `matplotlib`, `wordcloud`, `pandas` | データ分析・可視化スキル |
-| 🌐 | **Web抽出**<br>URLからテキスト抽出・PDF保存<br>電子書籍（テキスト）生成 | `requests`, `BeautifulSoup`, `popdf` | スクレイピング・文書変換 |
-| 📧 | **メール自動送信**<br>添付ファイル・テンプレート対応 | `smtplib`, `email` | 業務コミュニケーション自動化 |
-| 📁 | **ファイル管理**<br>拡張子別整理・一括リネーム・内容検索 | `pofile`, `shutil` | OS操作・ファイルシステム知識 |
+## 画面イメージ
 
----
-## 🖥️ 動作環境
+現在の README では、リポジトリ内に保存済みの最新キャプチャを掲載しています。
 
-| 項目 | 要件 |
-|------|------|
-| OS | Windows 10/11, macOS 12+, Linux (一部機能制限) |
-| Python | 3.8 以上 |
-| メモリ | 4GB以上（推奨） |
-| ディスク | 500MB以上の空き容量 |
+| 画面          | プレビュー                          |
+|-------------|--------------------------------|
+| AI ワークスペース  | ![AI ワークスペース](img/img001.png)  |
+| AI-OCR      | ![OCR ワークスペース](img/img002.png) |
+| データ可視化      | ![データ可視化](img/img003.png)      |
+| web抽出       | ![ファイル整理](img/img004.png)      |
+| AIメールアシスタント | ![web抽出](img/img005.png)       |
+| ファイル整理      | ![ファイル整理](img/img006.png)      |
+| API 設定      | ![API 設定 ](img/img007.png)     |
 
-### 必要な外部ツール（OCR用）
-- **Tesseract OCR** エンジン（無料）
-  - [Windows ダウンロード](https://github.com/UB-Mannheim/tesseract/wiki)
-  - macOS: `brew install tesseract tesseract-lang`
-  - Linux: `sudo apt install tesseract-ocr tesseract-ocr-jpn`
+## モジュール構成
 
----
+| モジュール | 概要 | 主なライブラリ |
+|---|---|---|
+| AI ワークスペース | 要約、TODO、改善案、異常値確認などの統合分析 | `porobot`, `pandas`, `requests` |
+| OCR | 全文 OCR、帳票解析、非定型文書整理、RPA JSON | `pytesseract`, `Pillow` |
+| データ可視化 | グラフ / ワードクラウド生成、AI 解説、PDF 化 | `matplotlib`, `wordcloud`, `pandas` |
+| Web 抽出 | 本文抽出、AI 整理、PDF / テキスト保存 | `requests`, `beautifulsoup4`, `popdf` |
+| AI メール | 読解、返信案作成、SMTP 送信 | `smtplib`, `email` |
+| ファイル整理 | フォルダ分析、Space Lens、検索、重複検出、リネーム | `pathlib`, `shutil`, `zipfile`, `tarfile` |
 
-## 🚀 インストールと起動
+## AI API 連携
+
+アプリ内の `API 設定` ダイアログから、外部 AI プロバイダーを切り替えられます。
+
+- OpenRouter
+- SiliconFlow
+- DeepSeek 互換 API
+- GLM 互換 API
+- Qwen 互換 API
+- Kimi 互換 API
+- MiniMax 互換 API
+- `/v1/chat/completions` 互換の各種 API
+
+利用できる機能:
+
+- 接続テスト
+- 一括診断
+- Base URL / モデル / API Key の個別設定
+- タイムアウト秒数の調整え
+
+## ファイル整理でできること
+
+現在の `ファイル整理` タブでは、次の実用機能を使えます。
+
+- フォルダ全体を再帰走査して大きい項目を集計
+- Space Lens レポートを生成
+- 名前検索 / 内容検索
+- 拡張子ごとの分類
+- 重複ファイル検出
+- パス手入力 + 自動補完での移動
+- 正規表現対応のバッチリネーム
+- リネーム前プレビュー
+- テキスト / Markdown / CSV / JSON / Python のテンプレート作成
+- ZIP / TAR / TGZ / TAR.GZ などの一覧参照
+
+## OCR でできること
+
+- 全文 OCR
+- 定型帳票解析
+- 非定型文書解析
+- OCR 結果の整理保存
+- RPA 向け JSON 出力
+- 外部 AI API での再分析
+
+## データ可視化でできること
+
+- CSV / Excel / テキストの読み込み
+- 棒グラフ / 折れ線 / 円グラフ / ワードクラウド
+- AI API を使ったグラフ解説
+- PDF レポート出力
+
+## 動作環境
+
+| 項目 | 内容 |
+|---|---|
+| OS | Windows 10 / 11 推奨 |
+| Python | 3.10 以上を推奨 |
+| GUI | PySide6 |
+| OCR | Tesseract OCR が必要 |
+
+## インストール
+
+### 1. リポジトリ取得
+
 ```bash
-# 1. リポジトリクローン
 git clone https://github.com/yourname/office-ai-assistant.git
 cd office-ai-assistant
+```
 
-# 2. 依存パッケージインストール
+### 2. 仮想環境作成
+
+```bash
+python -m venv .venv
+```
+
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+macOS / Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+### 3. 依存関係インストール
+
+```bash
 pip install -r requirements.txt
+```
 
-# 3. Tesseractのインストール（OCR用）
-# Windows: https://github.com/UB-Mannheim/tesseract/wiki からインストール
-# macOS: brew install tesseract tesseract-lang
-# Linux: sudo apt install tesseract-ocr tesseract-ocr-jpn
+### 4. Tesseract OCR を導入
 
-# 4. アプリケーション実行
+- Windows: [UB Mannheim Tesseract](https://github.com/UB-Mannheim/tesseract/wiki)
+- macOS:
+
+```bash
+brew install tesseract tesseract-lang
+```
+
+- Ubuntu / Debian:
+
+```bash
+sudo apt install tesseract-ocr tesseract-ocr-jpn
+```
+
+Windows で Tesseract の場所を明示したい場合は、`src/core/ocr_engine.py` 側の設定を環境に合わせて調整してください。
+
+## 起動方法
+
+```bash
 python main.py
 ```
-## 🖥️ 仮想環境（推奨）
+
+## テスト
+
 ```bash
-python -m venv venv
-source venv/bin/activate      # macOS/Linux
-venv\Scripts\activate          # Windows
-```
-## 🖥️依存パッケージのインストール
-```bash
-pip install -r requirements.txt
-
-```
-## 🖥️Tesseractの設定（Windowsのみ）
-src/core/ocr_engine.py の先頭に以下の行を追加（インストール先に合わせる）：
-```bash
-import pytesseract
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-```
-## 🖥️アイコンの生成（初回のみ）
-```bash
-python generate_icons.py   # Pillowが必要（自動インストール済）
-
-```
-## 🖥️アプリケーションの起動
-```bash
-python main.py
+python -m unittest discover -s tests -v
 ```
 
-## 📁 プロジェクト構造 
-``` bash
-office-ai-assistant/                    # プロジェクトルート
-│
-├── main.py                             # エントリーポイント
-├── requirements.txt                    # 依存パッケージ一覧
-├── README_JP.md                        # 日本語説明書
-├── README.md                           # 英語/中国語説明書
-├── .gitignore                          # Git除外設定
-├── LICENSE                             # Apache 2.0ライセンス
-├── generate_icons.py                   # アイコン自動生成スクリプト（実行後削除可）
-│
-├── src/                                # ソースコードルート
-│   ├── __init__.py
-│   ├── config.py                       # 設定管理
-│   ├── compatibility.py                # クロスプラットフォーム互換性
-│   │
-│   ├── core/                           # ビジネスロジック
-│   │   ├── __init__.py
-│   │   ├── ai_assistant.py             # AIタスクアシスタント
-│   │   ├── ocr_engine.py               # OCR + 請求書認識
-│   │   ├── visualization.py            # グラフ・ワードクラウド生成
-│   │   ├── web_extractor.py            # Web抽出・電子書籍生成
-│   │   ├── email_sender.py             # メール自動送信
-│   │   └── file_manager.py             # ファイル整理・リネーム・検索
-│   │
-│   ├── ui/                             # GUI関連
-│   │   ├── __init__.py
-│   │   ├── main_window.py              # メインウィンドウ
-│   │   ├── tabs/                       # 各機能タブ
-│   │   │   ├── __init__.py
-│   │   │   ├── ai_tab.py               # AIアシスタントタブ
-│   │   │   ├── ocr_tab.py              # OCRタブ
-│   │   │   ├── viz_tab.py              # データ可視化タブ
-│   │   │   ├── web_tab.py              # Web抽出タブ
-│   │   │   ├── email_tab.py            # メール送信タブ
-│   │   │   └── file_tab.py             # ファイル管理タブ
-│   │   └── resources/                  # リソースファイル
-│   │       ├── style.qss               # Qtスタイルシート
-│   │       └── icons/                  # アイコンフォルダ
-│   │           ├── ai.png
-│   │           ├── ocr.png
-│   │           ├── viz.png
-│   │           ├── web.png
-│   │           ├── email.png
-│   │           ├── file.png
-│   │           └── settings.png
-│   │
-│   └── utils/                          # ユーティリティ
-│       ├── __init__.py
-│       ├── logger.py                   # ログ設定
-│       ├── file_helper.py              # ファイル補助関数
-│       └── i18n.py                     # 国際化（日本語・英語・中国語）
-│
-├── tests/                              # 単体テスト
-│   ├── test_ocr.py
-│   └── test_email.py
-│
-├── samples/                            # サンプルファイル
-│   ├── invoice_sample.jpg              # テスト用請求書画像
-│   └── data.xlsx                       # テスト用Excelデータ
-│
-├── logs/                               # ログ保存ディレクトリ（自動生成）
-│   └── app.log
-│
-├── output/                             # グラフ・ワードクラウド出力先
-│
-└── web_output/                         # Web抽出結果出力先
+## ディレクトリ構成
+
+```text
+office-ai-assistant/
+├─ main.py
+├─ requirements.txt
+├─ README.md
+├─ generate_icons.py
+├─ img/
+├─ logs/
+├─ output/
+├─ samples/
+├─ src/
+│  ├─ config.py
+│  ├─ compatibility.py
+│  ├─ core/
+│  │  ├─ ai_assistant.py
+│  │  ├─ email_ai_assistant.py
+│  │  ├─ file_manager.py
+│  │  ├─ llm_client.py
+│  │  ├─ ocr_engine.py
+│  │  ├─ visualization.py
+│  │  └─ web_extractor.py
+│  ├─ ui/
+│  │  ├─ main_window.py
+│  │  ├─ resources/
+│  │  │  ├─ icons/
+│  │  │  └─ style.qss
+│  │  ├─ tabs/
+│  │  │  ├─ ai_tab.py
+│  │  │  ├─ email_tab.py
+│  │  │  ├─ file_tab.py
+│  │  │  ├─ ocr_tab.py
+│  │  │  ├─ viz_tab.py
+│  │  │  └─ web_tab.py
+│  │  └─ widgets/
+│  │     ├─ api_settings.py
+│  │     └─ rich_result_panel.py
+│  └─ utils/
+│     ├─ i18n.py
+│     └─ logger.py
+└─ tests/
+   ├─ test_ai_assistant.py
+   ├─ test_email.py
+   ├─ test_email_ai.py
+   ├─ test_file_manager.py
+   ├─ test_llm_client.py
+   ├─ test_ocr.py
+   └─ test_ui_language.py
 ```
-## 🧪 テストの実行
-```bash
-pytest tests/
-```
-カバレッジレポートを生成する場合：
-```bash
-pip install pytest-cov
-pytest --cov=src tests/
-```
-## 📜 ライセンス  
-このプロジェクトは Apache License 2.0 の下で公開されています。
 
-## 🙏 謝辞
-python-office – 素晴らしい自動化ライブラリ
+## 現在の実装メモ
 
-Tesseract OCR – オープンソースOCRエンジン
+- デフォルト表示言語は日本語
+- 画面切り替え時はタブを安全に再構築
+- 外部 AI API が失敗しても、ローカル処理は継続できる設計
+- README の説明は現在の実装に合わせて更新済み
 
-Qt for Python (PySide6) – クロスプラットフォームGUI
+## ライセンス
 
-## 📧 作者情報
-GitHub: pullead
-
-LinkedIn: https://github.com/pullead?tab=repositories
+Apache License 2.0

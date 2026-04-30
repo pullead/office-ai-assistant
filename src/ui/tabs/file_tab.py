@@ -9,7 +9,9 @@ from pathlib import Path
 from PySide6.QtCore import QDir, QSortFilterProxyModel, QThread, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
+    QCompleter,
     QFrame,
     QFileDialog,
     QFileSystemModel,
@@ -113,7 +115,12 @@ class FileWorker(QThread):
                 preview_files = [str(path) for path in Path(directory).rglob("*") if path.is_file()][:300]
                 payload = {"title": "拡張子整理", "text": text, "files": preview_files}
             elif self.operation == "rename":
-                text = self.manager.batch_rename(directory, self.kwargs["pattern"], self.kwargs["replacement"])
+                text = self.manager.batch_rename(
+                    directory,
+                    self.kwargs["pattern"],
+                    self.kwargs["replacement"],
+                    self.kwargs.get("use_regex", False),
+                )
                 payload = {"title": "一括リネーム", "text": text, "files": []}
             elif self.operation == "search_content":
                 hits = self.manager.search_content(directory, self.kwargs["keyword"], limit=400)
@@ -182,6 +189,7 @@ class FileTab(BaseTab):
         self.file_manager = FileManager()
         self.current_dir = None
         self.worker = None
+        self.last_space_lens_html = None
         self._tree_flash_timer = QTimer(self)
         self._tree_flash_timer.setSingleShot(True)
         self._tree_flash_timer.timeout.connect(self._reset_tree_highlight_style)
@@ -256,6 +264,20 @@ class FileTab(BaseTab):
         dir_row.addWidget(self.pc_btn)
         controls_layout.addLayout(dir_row)
 
+        path_row = QHBoxLayout()
+        self.path_input = QLineEdit()
+        self.path_input.setPlaceholderText("C:\\Users\\... または任意のフォルダパス")
+        self.path_input.setMinimumHeight(38)
+        self.path_input.returnPressed.connect(self._jump_to_path)
+        path_row.addWidget(self.path_input)
+
+        self.go_path_btn = QPushButton("移動")
+        self.go_path_btn.setObjectName("ToolButton")
+        self.go_path_btn.setMinimumHeight(38)
+        self.go_path_btn.clicked.connect(self._jump_to_path)
+        path_row.addWidget(self.go_path_btn)
+        controls_layout.addLayout(path_row)
+
         self.dir_label = QLabel("未選択")
         self.dir_label.setObjectName("PageSubtitle")
         self.dir_label.setWordWrap(True)
@@ -318,12 +340,49 @@ class FileTab(BaseTab):
         self.rename_to.setPlaceholderText("置換後")
         rename_row.addWidget(self.rename_to)
         controls_layout.addLayout(rename_row)
+        rename_option_row = QHBoxLayout()
+        self.rename_regex_box = QCheckBox("正規表現")
+        rename_option_row.addWidget(self.rename_regex_box)
+        self.rename_preview_btn = QPushButton("プレビュー")
+        self.rename_preview_btn.setObjectName("ToolButton")
+        self.rename_preview_btn.setMinimumHeight(36)
+        self.rename_preview_btn.clicked.connect(self._preview_rename)
+        rename_option_row.addWidget(self.rename_preview_btn)
+        rename_option_row.addStretch()
+        controls_layout.addLayout(rename_option_row)
 
         self.rename_btn = QPushButton("リネーム実行")
         self.rename_btn.setObjectName("SecondaryButton")
         self.rename_btn.setMinimumHeight(40)
         self.rename_btn.clicked.connect(self._rename)
         controls_layout.addWidget(self.rename_btn)
+        controls_layout.addWidget(make_section_label("クイック作成"))
+        template_row = QHBoxLayout()
+        self.template_combo = QComboBox()
+        self.template_combo.addItem("テキスト", "text")
+        self.template_combo.addItem("Markdown", "markdown")
+        self.template_combo.addItem("CSV", "csv")
+        self.template_combo.addItem("JSON", "json")
+        self.template_combo.addItem("Python", "python")
+        template_row.addWidget(self.template_combo)
+        self.template_name_input = QLineEdit()
+        self.template_name_input.setPlaceholderText("新規ファイル名")
+        template_row.addWidget(self.template_name_input)
+        controls_layout.addLayout(template_row)
+        self.template_content_input = QLineEdit()
+        self.template_content_input.setPlaceholderText("任意の初期内容（空ならテンプレート既定値）")
+        controls_layout.addWidget(self.template_content_input)
+        self.create_template_btn = QPushButton("テンプレートから作成")
+        self.create_template_btn.setObjectName("ToolButton")
+        self.create_template_btn.setMinimumHeight(40)
+        self.create_template_btn.clicked.connect(self._create_template_file)
+        controls_layout.addWidget(self.create_template_btn)
+        controls_layout.addWidget(make_section_label("アーカイブ閲覧"))
+        self.archive_btn = QPushButton("圧縮ファイルを閲覧")
+        self.archive_btn.setObjectName("ToolButton")
+        self.archive_btn.setMinimumHeight(40)
+        self.archive_btn.clicked.connect(self._browse_archive)
+        controls_layout.addWidget(self.archive_btn)
 
         controls_layout.addWidget(make_section_label("検索"))
         self.search_kw = QLineEdit()
@@ -408,6 +467,14 @@ class FileTab(BaseTab):
         self.tree_model.setRootPath("")
         self.tree_model.setFilter(QDir.AllDirs | QDir.Files | QDir.NoDotAndDotDot)
 
+        self.path_model = QFileSystemModel(self)
+        self.path_model.setRootPath("")
+        self.path_model.setFilter(QDir.AllDirs | QDir.Drives | QDir.NoDotAndDotDot)
+        self.path_completer = QCompleter(self.path_model, self)
+        self.path_completer.setCompletionMode(QCompleter.PopupCompletion)
+        self.path_completer.setFilterMode(Qt.MatchContains)
+        self.path_input.setCompleter(self.path_completer)
+
         self.tree_proxy = FileFilterProxyModel(self)
         self.tree_proxy.setSourceModel(self.tree_model)
 
@@ -454,6 +521,7 @@ class FileTab(BaseTab):
     def _set_current_dir(self, directory: str):
         """現在の対象フォルダを設定し、ツリーを更新する。"""
         self.current_dir = directory
+        self.path_input.setText(directory)
         self.dir_label.setText(directory)
         root_index = self.tree_model.index(directory)
         proxy_root = self.tree_proxy.mapFromSource(root_index)
@@ -461,6 +529,22 @@ class FileTab(BaseTab):
         self.tree_view.setColumnWidth(0, 380)
         self.search_result_list.clear()
         self._apply_tree_filters()
+
+    def _jump_to_path(self):
+        """アドレスバーから任意の場所へ移動する。"""
+        raw_path = self.path_input.text().strip().strip('"')
+        if not raw_path:
+            return
+        target = Path(raw_path).expanduser()
+        if target.is_file():
+            if target.suffix.lower() in {".zip", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".tar.gz", ".tar.bz2", ".tar.xz"}:
+                self._show_archive_entries(str(target))
+                return
+            target = target.parent
+        if not target.exists() or not target.is_dir():
+            QMessageBox.warning(self, "入力確認", "有効なフォルダパスを入力してください。")
+            return
+        self._set_current_dir(str(target))
 
     def _check_dir(self) -> bool:
         """対象フォルダの有無を確認する。"""
@@ -576,7 +660,83 @@ class FileTab(BaseTab):
         if not pattern:
             QMessageBox.warning(self, "入力確認", "置換前の文字列を入力してください。")
             return
-        self._start_worker("rename", directory=self.current_dir, pattern=pattern, replacement=replacement)
+        self._start_worker(
+            "rename",
+            directory=self.current_dir,
+            pattern=pattern,
+            replacement=replacement,
+            use_regex=self.rename_regex_box.isChecked(),
+        )
+
+    def _preview_rename(self):
+        """一括リネームのプレビューを表示する。"""
+        if not self._check_dir():
+            return
+        pattern = self.rename_from.text().strip()
+        replacement = self.rename_to.text()
+        if not pattern:
+            QMessageBox.warning(self, "入力確認", "置換前の文字列を入力してください。")
+            return
+        rows = self.file_manager.preview_batch_rename(
+            self.current_dir,
+            pattern,
+            replacement,
+            use_regex=self.rename_regex_box.isChecked(),
+        )
+        self.result_panel.set_report_html(self._build_rename_preview_html(rows))
+        if rows:
+            self.result_panel.show_files([item["path"] for item in rows[:250]])
+        else:
+            self.result_panel.show_text_preview("変更対象になるファイルは見つかりませんでした。")
+
+    def _create_template_file(self):
+        """テンプレートから新規ファイルを作成する。"""
+        if not self._check_dir():
+            return
+        file_name = self.template_name_input.text().strip()
+        if not file_name:
+            QMessageBox.warning(self, "入力確認", "新規ファイル名を入力してください。")
+            return
+        try:
+            created = self.file_manager.create_template_file(
+                self.current_dir,
+                self.template_combo.currentData(),
+                file_name,
+                self.template_content_input.text(),
+            )
+        except Exception as error:
+            QMessageBox.warning(self, "作成エラー", str(error))
+            return
+        self._set_current_dir(self.current_dir)
+        self.result_panel.set_report_html(
+            f"<h2>テンプレート作成</h2><p>{self._escape_html(created)} を作成しました。</p>"
+        )
+        self.result_panel.show_text_preview(Path(created).read_text(encoding='utf-8', errors='ignore')[:12000])
+
+    def _browse_archive(self):
+        """圧縮ファイルを選択して内容一覧を表示する。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "圧縮ファイルを選択",
+            self.current_dir or "",
+            "圧縮ファイル (*.zip *.tar *.gz *.tgz *.bz2 *.xz *.tar.gz *.tar.bz2 *.tar.xz)",
+        )
+        if path:
+            self._show_archive_entries(path)
+
+    def _show_archive_entries(self, archive_path: str):
+        """圧縮ファイルの内容を結果パネルへ表示する。"""
+        try:
+            payload = self.file_manager.list_archive_entries(archive_path)
+        except Exception as error:
+            QMessageBox.warning(self, "アーカイブ閲覧", str(error))
+            return
+        self.result_panel.set_report_html(self._build_archive_html(payload))
+        preview_rows = [
+            f"{entry['name']} | {self._format_size(entry['size'])}"
+            for entry in payload["entries"][:300]
+        ]
+        self.result_panel.show_files(preview_rows)
 
     def _scan_large_old_files(self):
         """大型かつ長期間未使用のファイルを抽出する。"""
@@ -633,6 +793,7 @@ class FileTab(BaseTab):
         self.search_result_list.clear()
         if "space_lens" in payload:
             report = payload["space_lens"]
+            self.last_space_lens_html = report.get("html_path")
             self.result_panel.set_report_html(self._build_space_lens_html(report))
             if report.get("html_path"):
                 self.result_panel.show_html_file(report["html_path"])
@@ -822,6 +983,58 @@ class FileTab(BaseTab):
             + "</table></div>"
         )
 
+    def _build_rename_preview_html(self, rows: list[dict]) -> str:
+        """一括リネームのプレビュー HTML を返す。"""
+        body_rows = []
+        for item in rows[:30]:
+            body_rows.append(
+                "<tr>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'>{self._escape_html(item['before'])}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{self._escape_html(item['after'])}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{self._format_size(item['size'])}</td>"
+                "</tr>"
+            )
+        if not body_rows:
+            body_rows.append("<tr><td colspan='3' style='padding:8px;border:1px solid #e7dcc7;'>変更対象なし</td></tr>")
+        return (
+            "<div style='font-family:Yu Gothic UI,Meiryo,sans-serif;color:#1f2937;'>"
+            "<h2>一括リネームプレビュー</h2>"
+            "<table style='width:100%;border-collapse:collapse;'>"
+            "<tr>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>変更前</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>変更後</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>サイズ</b></td>"
+            "</tr>"
+            + "".join(body_rows)
+            + "</table></div>"
+        )
+
+    def _build_archive_html(self, payload: dict) -> str:
+        """アーカイブ一覧の HTML を返す。"""
+        rows = []
+        for entry in payload["entries"][:30]:
+            rows.append(
+                "<tr>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'>{self._escape_html(entry['name'])}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{self._format_size(entry['size'])}</td>"
+                f"<td style='border:1px solid #e7dcc7;padding:6px;'>{self._format_size(entry['compressed'])}</td>"
+                "</tr>"
+            )
+        return (
+            "<div style='font-family:Yu Gothic UI,Meiryo,sans-serif;color:#1f2937;'>"
+            "<h2>アーカイブ閲覧</h2>"
+            f"<p>{self._escape_html(payload['archive'])}</p>"
+            f"<p>格納ファイル数: {payload['count']}</p>"
+            "<table style='width:100%;border-collapse:collapse;'>"
+            "<tr>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>項目</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>元サイズ</b></td>"
+            "<td style='border:1px solid #e7dcc7;padding:6px;background:#f8f5ef;'><b>圧縮後</b></td>"
+            "</tr>"
+            + "".join(rows)
+            + "</table></div>"
+        )
+
     def _table_row(self, title: str, value: str) -> str:
         """レポート用の2列テーブル行を返す。"""
         return (
@@ -902,10 +1115,14 @@ class FileTab(BaseTab):
             self.large_old_btn,
             self.shred_btn,
             self.rename_btn,
+            self.rename_preview_btn,
             self.search_name_btn,
             self.search_content_btn,
             self.apply_filter_btn,
             self.clear_filter_btn,
+            self.go_path_btn,
+            self.create_template_btn,
+            self.archive_btn,
         ):
             button.setEnabled(enabled)
         self.type_filter_combo.setEnabled(enabled)
@@ -914,6 +1131,11 @@ class FileTab(BaseTab):
         self.modified_filter_combo.setEnabled(enabled)
         self.large_file_mb.setEnabled(enabled)
         self.old_file_days.setEnabled(enabled)
+        self.path_input.setEnabled(enabled)
+        self.template_combo.setEnabled(enabled)
+        self.template_name_input.setEnabled(enabled)
+        self.template_content_input.setEnabled(enabled)
+        self.rename_regex_box.setEnabled(enabled)
 
     def _reset_ui(self, *_args):
         """処理終了後に UI を戻す。"""

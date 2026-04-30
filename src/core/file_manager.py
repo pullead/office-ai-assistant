@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import re
 import shutil
+import tarfile
 import time
+import zipfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -37,7 +41,7 @@ class FileManager:
         return f"{moved_count} 件のファイルを拡張子ごとに整理しました。"
 
     @staticmethod
-    def batch_rename(directory: str, pattern: str, replacement: str) -> str:
+    def batch_rename(directory: str, pattern: str, replacement: str, use_regex: bool = False) -> str:
         """ファイル名の一括置換を行う。"""
         dir_path = Path(directory)
         if not dir_path.exists():
@@ -47,13 +51,45 @@ class FileManager:
         for file in dir_path.iterdir():
             if not file.is_file():
                 continue
-            new_name = file.name.replace(pattern, replacement)
+            new_name = FileManager._build_renamed_name(file.name, pattern, replacement, use_regex)
             if new_name == file.name:
                 continue
             file.rename(file.parent / new_name)
             count += 1
 
         return f"{count} 件のファイル名を変更しました。"
+
+    @staticmethod
+    def preview_batch_rename(
+        directory: str,
+        pattern: str,
+        replacement: str,
+        use_regex: bool = False,
+        limit: int = 200,
+    ) -> list[dict]:
+        """一括リネームのプレビュー一覧を返す。"""
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            return []
+
+        rows = []
+        for file in sorted(dir_path.iterdir(), key=lambda item: item.name.lower()):
+            if len(rows) >= limit:
+                break
+            if not file.is_file():
+                continue
+            new_name = FileManager._build_renamed_name(file.name, pattern, replacement, use_regex)
+            if new_name == file.name:
+                continue
+            rows.append(
+                {
+                    "before": file.name,
+                    "after": new_name,
+                    "path": str(file),
+                    "size": file.stat().st_size,
+                }
+            )
+        return rows
 
     @staticmethod
     def search_content(directory: str, keyword: str, limit: int = 200) -> list[str]:
@@ -169,28 +205,8 @@ class FileManager:
         if not dir_path.exists():
             raise FileNotFoundError(f"ディレクトリが見つかりません: {directory}")
 
-        nodes = []
+        nodes = FileManager._collect_storage_nodes(dir_path, max_items=max_items)
         summary_rows = []
-        for child in sorted(dir_path.iterdir(), key=lambda item: item.name.lower()):
-            try:
-                if child.is_dir():
-                    size = FileManager._calculate_directory_size(child)
-                    count = sum(1 for entry in child.rglob("*") if entry.is_file())
-                else:
-                    size = child.stat().st_size
-                    count = 1
-            except OSError:
-                continue
-            nodes.append(
-                {
-                    "path": str(child),
-                    "name": child.name,
-                    "size": size,
-                    "items": count,
-                    "kind": "folder" if child.is_dir() else "file",
-                }
-            )
-
         nodes.sort(key=lambda item: item["size"], reverse=True)
         visible_nodes = nodes[:max_items]
         for item in visible_nodes[:25]:
@@ -205,12 +221,21 @@ class FileManager:
             )
 
         html_path = FileManager._create_space_lens_html(dir_path, visible_nodes, output_dir)
+        largest_files = [item for item in visible_nodes if item["kind"] == "file"][:12]
+        top_folders = [item for item in visible_nodes if item["kind"] == "folder"][:12]
+        extension_totals = Counter()
+        for item in visible_nodes:
+            suffix = Path(item["path"]).suffix.lower() or "[拡張子なし]"
+            extension_totals[suffix] += item["size"]
         return {
             "directory": str(dir_path),
             "total_size": sum(item["size"] for item in nodes),
             "items": len(nodes),
             "summary_rows": summary_rows,
             "largest_items": visible_nodes[:20],
+            "largest_files": largest_files,
+            "top_folders": top_folders,
+            "extension_totals": extension_totals.most_common(10),
             "html_path": html_path,
         }
 
@@ -314,6 +339,69 @@ class FileManager:
         return dict(grouped)
 
     @staticmethod
+    def create_template_file(directory: str, template_key: str, file_name: str, custom_text: str = "") -> str:
+        """テンプレートから新規ファイルを作成する。"""
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"ディレクトリが見つかりません: {directory}")
+
+        templates = {
+            "text": "新規テキストファイル\n",
+            "markdown": "# 新規ドキュメント\n\n## 概要\n\n- 項目\n",
+            "csv": "項目,内容,備考\n",
+            "json": json.dumps({"title": "new file", "items": []}, ensure_ascii=False, indent=2) + "\n",
+            "python": "# -*- coding: utf-8 -*-\n\"\"\"新規スクリプト。\"\"\"\n\n\ndef main():\n    print(\"hello\")\n\n\nif __name__ == \"__main__\":\n    main()\n",
+        }
+        content = custom_text if custom_text.strip() else templates.get(template_key, "")
+        target = dir_path / file_name
+        if target.exists():
+            raise FileExistsError(f"同名ファイルが既に存在します: {target.name}")
+        target.write_text(content, encoding="utf-8")
+        return str(target)
+
+    @staticmethod
+    def list_archive_entries(archive_path: str, limit: int = 400) -> dict:
+        """圧縮ファイル内のエントリー一覧を返す。"""
+        path = Path(archive_path)
+        if not path.exists():
+            raise FileNotFoundError(f"圧縮ファイルが見つかりません: {archive_path}")
+
+        entries = []
+        lower_name = path.name.lower()
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as archive:
+                for info in archive.infolist()[:limit]:
+                    entries.append(
+                        {
+                            "name": info.filename,
+                            "size": info.file_size,
+                            "compressed": info.compress_size,
+                        }
+                    )
+        elif tarfile.is_tarfile(path) or any(
+            lower_name.endswith(suffix) for suffix in (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+        ):
+            with tarfile.open(path) as archive:
+                for member in archive.getmembers()[:limit]:
+                    if not member.isfile():
+                        continue
+                    entries.append(
+                        {
+                            "name": member.name,
+                            "size": member.size,
+                            "compressed": member.size,
+                        }
+                    )
+        else:
+            raise ValueError("現在のバージョンでは ZIP / TAR 系の閲覧に対応しています。")
+
+        return {
+            "archive": str(path),
+            "count": len(entries),
+            "entries": entries,
+        }
+
+    @staticmethod
     def _build_tree_preview(root: Path, max_depth: int = 2) -> list[str]:
         """表示用の簡易ツリーを生成する。"""
         lines: list[str] = []
@@ -330,6 +418,42 @@ class FileManager:
 
         walk(root, 0)
         return lines[:120]
+
+    @staticmethod
+    def _collect_storage_nodes(root: Path, max_items: int = 220) -> list[dict]:
+        """容量可視化向けのノード一覧を収集する。"""
+        nodes = []
+        for current in root.rglob("*"):
+            try:
+                if current.is_dir():
+                    size = FileManager._calculate_directory_size(current)
+                    if size <= 0:
+                        continue
+                    item_count = sum(1 for entry in current.rglob("*") if entry.is_file())
+                    kind = "folder"
+                elif current.is_file():
+                    size = current.stat().st_size
+                    item_count = 1
+                    kind = "file"
+                else:
+                    continue
+            except OSError:
+                continue
+            relative = str(current.relative_to(root))
+            depth = len(current.relative_to(root).parts)
+            nodes.append(
+                {
+                    "path": str(current),
+                    "name": current.name,
+                    "relative": relative,
+                    "size": size,
+                    "items": item_count,
+                    "kind": kind,
+                    "depth": depth,
+                }
+            )
+        nodes.sort(key=lambda item: (item["size"], -item["depth"]), reverse=True)
+        return nodes[:max_items]
 
     @staticmethod
     def _file_hash(path: Path) -> str:
@@ -442,6 +566,16 @@ class FileManager:
             encoding="utf-8",
         )
         return str(output_path)
+
+    @staticmethod
+    def _build_renamed_name(file_name: str, pattern: str, replacement: str, use_regex: bool) -> str:
+        """置換条件から新しいファイル名を返す。"""
+        if use_regex:
+            try:
+                return re.sub(pattern, replacement, file_name)
+            except re.error:
+                return file_name
+        return file_name.replace(pattern, replacement)
 
     @staticmethod
     def _overwrite_file(path: Path, passes: int = 1):

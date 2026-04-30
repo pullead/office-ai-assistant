@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QCheckBox,
     QComboBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -121,9 +122,52 @@ class AITab(BaseTab):
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
 
-        controls = QWidget()
+        rail = QFrame()
+        rail.setObjectName("WorkspaceNav")
+        rail.setFixedWidth(190)
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(14, 16, 14, 16)
+        rail_layout.setSpacing(12)
+        rail_layout.addWidget(make_section_label("AI Flow"))
+        for title, hint in (
+            ("1. 入力を集める", "テキスト / URL / ファイル"),
+            ("2. モードを選ぶ", "要約 / TODO / 異常値"),
+            ("3. レポート化", "PDF とプレビューを生成"),
+        ):
+            card = QFrame()
+            card.setObjectName("WorkspaceNavCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 12, 12, 12)
+            card_layout.setSpacing(4)
+            title_label = QLabel(title)
+            title_label.setObjectName("WorkspaceNavTitle")
+            hint_label = QLabel(hint)
+            hint_label.setObjectName("WorkspaceNavHint")
+            hint_label.setWordWrap(True)
+            card_layout.addWidget(title_label)
+            card_layout.addWidget(hint_label)
+            rail_layout.addWidget(card)
+
+        self.rail_analyze_btn = QPushButton("AI で分析")
+        self.rail_analyze_btn.setObjectName("PrimaryButton")
+        self.rail_analyze_btn.clicked.connect(self.run_smart_tool)
+        rail_layout.addWidget(self.rail_analyze_btn)
+
+        self.rail_file_btn = QPushButton("ファイル選択")
+        self.rail_file_btn.setObjectName("SecondaryButton")
+        self.rail_file_btn.clicked.connect(self._select_file)
+        rail_layout.addWidget(self.rail_file_btn)
+
+        self.rail_clear_btn = QPushButton("入力をクリア")
+        self.rail_clear_btn.setObjectName("ToolButton")
+        self.rail_clear_btn.clicked.connect(self._clear_inputs)
+        rail_layout.addWidget(self.rail_clear_btn)
+        rail_layout.addStretch()
+
+        controls = QFrame()
+        controls.setObjectName("WorkspacePanel")
         controls_layout = QVBoxLayout(controls)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setContentsMargins(18, 18, 18, 18)
         controls_layout.setSpacing(14)
 
         controls_layout.addWidget(make_section_label("クイックコマンド"))
@@ -255,18 +299,20 @@ class AITab(BaseTab):
         controls_layout.addWidget(self.progress_bar)
         controls_layout.addStretch()
 
-        result_wrapper = QWidget()
+        result_wrapper = QFrame()
+        result_wrapper.setObjectName("WorkspaceFloat")
         result_layout = QVBoxLayout(result_wrapper)
-        result_layout.setContentsMargins(0, 0, 0, 0)
+        result_layout.setContentsMargins(18, 18, 18, 18)
         result_layout.setSpacing(10)
         result_layout.addWidget(make_section_label("結果レポート"))
 
         self.result_panel = RichResultPanel()
         result_layout.addWidget(self.result_panel)
 
+        splitter.addWidget(rail)
         splitter.addWidget(controls)
         splitter.addWidget(result_wrapper)
-        splitter.setSizes([420, 860])
+        splitter.setSizes([190, 520, 620])
         self.card_layout.addWidget(splitter, 1)
 
         self._refresh_hint()
@@ -510,6 +556,9 @@ class AITab(BaseTab):
         for button in (
             self.run_btn,
             self.smart_btn,
+            self.rail_analyze_btn,
+            self.rail_file_btn,
+            self.rail_clear_btn,
             self.file_btn,
             self.clear_file_btn,
             self.api_settings_btn,
