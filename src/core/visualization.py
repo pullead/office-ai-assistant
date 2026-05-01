@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
-"""データ可視化処理。"""
+"""データ可視化の生成ロジック。"""
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from typing import Any
+import re
 
 
 class DataVisualizer:
-    """表データやテキストから可視化結果を生成する。"""
+    """表データとテキストから可視化結果を生成する。"""
+
+    TEXT_LABEL_COLUMN = "項目"
+    TEXT_VALUE_COLUMN = "件数"
 
     def __init__(self, output_dir: str | None = None):
         self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "output" / "visualization"
@@ -21,7 +26,7 @@ class DataVisualizer:
         x_col: str | None = None,
         y_col: str | None = None,
     ) -> dict[str, Any]:
-        """可視化を生成してメタ情報を返す。"""
+        """可視化を生成して表示用メタ情報を返す。"""
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"ファイルが見つかりません: {file_path}")
@@ -56,7 +61,7 @@ class DataVisualizer:
         }
 
     def load_table(self, path: Path):
-        """CSV / Excel を DataFrame として読み込む。"""
+        """CSV / Excel / TXT を DataFrame として読み込む。"""
         _plt, pd, _wordcloud, _plotly = self._load_dependencies()
 
         suffix = path.suffix.lower()
@@ -64,17 +69,18 @@ class DataVisualizer:
             return self._read_csv_with_fallback(path, pd)
         if suffix in {".xlsx", ".xls"}:
             return pd.read_excel(path)
-        raise ValueError("表データとして読み込めるのは CSV / Excel のみです。")
+        if suffix == ".txt":
+            return self._build_text_frequency_table(self._read_text_with_fallback(path), pd)
+        raise ValueError("可視化として読み込めるのは CSV / Excel / TXT のみです。")
 
     def generate_wordcloud(self, text: str, output_name: str = "wordcloud.png") -> str:
         """テキストからワードクラウド画像を生成する。"""
         plt, _pd, wordcloud_cls, _plotly = self._load_dependencies()
         cleaned_text = text.strip()
         if not cleaned_text:
-            raise ValueError("ワードクラウド用のテキストが空です。")
+            raise ValueError("ワードクラウド生成用のテキストが空です。")
 
         stopwords = {"こと", "ため", "これ", "それ", "です", "ます", "した", "して", "ある", "いる"}
-
         wc = wordcloud_cls(
             font_path=self._get_japanese_font_path(),
             width=1400,
@@ -89,6 +95,14 @@ class DataVisualizer:
         ax.axis("off")
         plt.tight_layout()
         return self._save_figure(fig, output_name)
+
+    def _build_text_frequency_table(self, text: str, pd_module):
+        """テキストを頻出語の表形式へ変換する。"""
+        tokens = self._tokenize(text)
+        rows = self._top_tokens(tokens, limit=20)
+        if not rows:
+            return pd_module.DataFrame(columns=[self.TEXT_LABEL_COLUMN, self.TEXT_VALUE_COLUMN])
+        return pd_module.DataFrame(rows, columns=[self.TEXT_LABEL_COLUMN, self.TEXT_VALUE_COLUMN])
 
     def _create_plotly_chart(self, dataframe, source_name: str, mode: str, x_col: str, y_col: str) -> str:
         """Plotly のインタラクティブ HTML を生成する。"""
@@ -115,13 +129,13 @@ class DataVisualizer:
             legend={"orientation": "h", "y": -0.18},
             hoverlabel={"bgcolor": "#0f172a", "font_size": 13},
         )
-        fig.update_traces(
-            hovertemplate=f"{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>"
-            if mode != "pie"
-            else f"{x_col}: %{{label}}<br>{y_col}: %{{value}}<br>比率: %{{percent}}<extra></extra>"
-        )
 
-        if mode in {"bar", "line"}:
+        if mode == "pie":
+            fig.update_traces(
+                hovertemplate=f"{x_col}: %{{label}}<br>{y_col}: %{{value}}<br>構成比: %{{percent}}<extra></extra>"
+            )
+        else:
+            fig.update_traces(hovertemplate=f"{x_col}: %{{x}}<br>{y_col}: %{{y}}<extra></extra>")
             fig.update_xaxes(showgrid=False)
             fig.update_yaxes(showgrid=True, gridcolor="#e7e5e4")
 
@@ -130,7 +144,7 @@ class DataVisualizer:
         html_path.write_text(
             (
                 "<!DOCTYPE html><html lang='ja'><head><meta charset='utf-8'>"
-                "<title>可視化結果</title>"
+                "<title>可視化レポート</title>"
                 "<style>"
                 "body{margin:0;padding:18px;background:linear-gradient(180deg,#fffdf8,#f4efe7);"
                 "font-family:'Yu Gothic UI','Meiryo',sans-serif;color:#1f2937;}"
@@ -138,7 +152,7 @@ class DataVisualizer:
                 "box-shadow:0 18px 48px rgba(15,23,42,.10);}"
                 ".note{margin:0 0 12px 0;color:#475569;font-size:14px;}"
                 "</style></head><body><div class='card'>"
-                "<p class='note'>マウスオーバーで詳細確認、凡例クリックで表示切替、ホイールで拡大縮小が可能です。</p>"
+                "<p class='note'>マウスオーバーで詳細値、凡例クリックで系列の切り替え、ホイール操作で拡大縮小ができます。</p>"
                 f"{html_body}</div></body></html>"
             ),
             encoding="utf-8",
@@ -146,7 +160,7 @@ class DataVisualizer:
         return str(html_path)
 
     def _create_static_chart(self, dataframe, source_name: str, mode: str, x_col: str, y_col: str) -> str:
-        """PDF 用の静的グラフ画像を生成する。"""
+        """PDF 用の静止画像プレビューを生成する。"""
         plt, _pd, _wordcloud, _plotly = self._load_dependencies()
 
         df = dataframe.copy()
@@ -176,7 +190,7 @@ class DataVisualizer:
         return self._save_figure(fig, f"{source_name}_{mode}.png")
 
     def _build_table_summary(self, path: Path, dataframe, x_col: str, y_col: str, mode: str) -> str:
-        """グラフ用の要約文を作る。"""
+        """表データの要約文を生成する。"""
         series = dataframe[y_col].dropna()
         top_rows = dataframe[[x_col, y_col]].sort_values(by=y_col, ascending=False).head(5)
         lines = [
@@ -184,13 +198,13 @@ class DataVisualizer:
             f"対象ファイル: {path}",
             f"行数: {len(dataframe)}",
             f"列数: {len(dataframe.columns)}",
-            f"軸: {x_col} / {y_col}",
+            f"使用列: {x_col} / {y_col}",
             "",
-            "指標サマリー",
+            "統計サマリー",
             f"- 平均値: {series.mean():.3f}",
             f"- 最小値: {series.min():.3f}",
             f"- 最大値: {series.max():.3f}",
-            f"- 欠損数: {int(dataframe[y_col].isna().sum())}",
+            f"- 欠損件数: {int(dataframe[y_col].isna().sum())}",
             "",
             "上位 5 件",
         ]
@@ -199,9 +213,9 @@ class DataVisualizer:
         return "\n".join(lines)
 
     def _build_wordcloud_summary(self, path: Path, text: str) -> str:
-        """ワードクラウド用の要約文を作る。"""
+        """ワードクラウド用の要約文を生成する。"""
         tokens = self._tokenize(text)
-        top_tokens = self._top_tokens(tokens)
+        top_tokens = self._top_tokens(tokens, limit=12)
         lines = [
             "可視化モード: ワードクラウド",
             f"対象ファイル: {path}",
@@ -214,7 +228,7 @@ class DataVisualizer:
         return "\n".join(lines)
 
     def _load_text_source(self, path: Path) -> str:
-        """テキスト系入力を文字列として読み込む。"""
+        """ワードクラウド用のテキストを読み込む。"""
         suffix = path.suffix.lower()
         if suffix == ".txt":
             return self._read_text_with_fallback(path)
@@ -224,7 +238,7 @@ class DataVisualizer:
         raise ValueError("ワードクラウドは TXT / CSV / Excel のみ対応しています。")
 
     def _read_csv_with_fallback(self, path: Path, pd_module):
-        """CSV を文字コード候補を切り替えながら読み込む。"""
+        """CSV を複数の文字コード候補で読み込む。"""
         encodings = ("utf-8-sig", "utf-8", "cp932", "shift_jis", "latin-1")
         last_error = None
         for encoding in encodings:
@@ -235,7 +249,7 @@ class DataVisualizer:
         raise ValueError(f"CSV の読み込みに失敗しました: {last_error}") from last_error
 
     def _read_text_with_fallback(self, path: Path) -> str:
-        """テキストを文字コード候補で読み込む。"""
+        """テキストを複数の文字コード候補で読み込む。"""
         encodings = ("utf-8-sig", "utf-8", "cp932", "shift_jis", "latin-1")
         last_error = None
         for encoding in encodings:
@@ -246,7 +260,7 @@ class DataVisualizer:
         raise ValueError(f"テキストの読み込みに失敗しました: {last_error}") from last_error
 
     def _resolve_columns(self, dataframe, first_col: str | None, second_col: str | None) -> tuple[str, str]:
-        """グラフ用の列を自動判定する。"""
+        """グラフ描画に使う列を決定する。"""
         _plt, pd, _wordcloud, _plotly = self._load_dependencies()
 
         if first_col is None:
@@ -257,7 +271,7 @@ class DataVisualizer:
                 raise ValueError("数値列が見つからないため、グラフを生成できません。")
             second_col = str(numeric_columns[0])
         if first_col not in dataframe.columns or second_col not in dataframe.columns:
-            raise ValueError("指定された列名がデータ内に存在しません。")
+            raise ValueError("指定された列がデータ内に存在しません。")
         return first_col, second_col
 
     def _save_figure(self, fig, output_name: str) -> str:
@@ -270,7 +284,7 @@ class DataVisualizer:
         return str(output_path)
 
     def _get_japanese_font_path(self) -> str | None:
-        """使用可能な日本語フォントを探す。"""
+        """利用可能な日本語フォントを返す。"""
         candidates = [
             Path("C:/Windows/Fonts/meiryo.ttc"),
             Path("C:/Windows/Fonts/YuGothM.ttc"),
@@ -284,21 +298,17 @@ class DataVisualizer:
         return None
 
     def _tokenize(self, text: str) -> list[str]:
-        """簡易トークン抽出を行う。"""
-        import re
-
+        """日本語と英数字の簡易トークンを抽出する。"""
         return re.findall(r"[A-Za-z0-9_\u3041-\u30ff\u4e00-\u9fff]{2,}", text)
 
-    def _top_tokens(self, tokens: list[str]) -> list[tuple[str, int]]:
-        """頻出語の上位を返す。"""
-        from collections import Counter
-
-        stopwords = {"です", "ます", "した", "して", "こと", "ため", "これ", "それ"}
+    def _top_tokens(self, tokens: list[str], limit: int) -> list[tuple[str, int]]:
+        """頻出語を上位件数で返す。"""
+        stopwords = {"こと", "ため", "これ", "それ", "です", "ます", "した", "して", "ある", "いる"}
         counter = Counter(token for token in tokens if token not in stopwords)
-        return counter.most_common(12)
+        return counter.most_common(limit)
 
     def _mode_label(self, mode: str) -> str:
-        """内部モード名を表示向けに変換する。"""
+        """モード名を日本語で返す。"""
         return {
             "bar": "棒グラフ",
             "line": "折れ線グラフ",
@@ -307,7 +317,7 @@ class DataVisualizer:
         }.get(mode, mode)
 
     def _load_dependencies(self):
-        """必要なライブラリを遅延読み込みする。"""
+        """必要ライブラリを遅延読み込みする。"""
         try:
             import matplotlib.pyplot as plt
             import pandas as pd

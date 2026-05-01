@@ -1,119 +1,76 @@
 # -*- coding: utf-8 -*-
-"""OCR と帳票情報抽出を行うモジュール。"""
+"""OCR と帳票情報抽出を扱うモジュール。"""
 
 from __future__ import annotations
 
 import json
 import re
 import shutil
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
 
 DEFAULT_TESSERACT_PATH = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+PDF_SUFFIXES = {".pdf"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
 
 
 class InvoiceRecognizer:
-    """OCR と請求書系の基本抽出を担当する。"""
+    """OCR と帳票系ドキュメントの情報抽出を行う。"""
+
+    DOCUMENT_KEYWORDS = {
+        "請求書": ("請求書", "invoice"),
+        "領収書": ("領収書", "receipt"),
+        "見積書": ("見積書", "quotation", "quote"),
+        "申請書": ("申請書", "application"),
+        "契約書": ("契約書", "agreement", "contract"),
+    }
 
     def __init__(self, lang: str = "jpn+eng"):
         self.lang = lang
 
     def image_to_text(self, image_path: str) -> str:
-        """画像からテキストを抽出する。"""
-        pytesseract, image_module = self._load_ocr_dependencies()
-        self._setup_tesseract(pytesseract)
-
-        image = image_module.open(image_path)
-        prepared_image = self._prepare_image(image)
-        candidates = []
-        for config in ("--psm 6", "--psm 4", "--psm 11", "--psm 3"):
-            try:
-                text = pytesseract.image_to_string(prepared_image, lang=self.lang, config=config)
-                normalized = self._normalize_text(text)
-                if normalized:
-                    score = self._score_ocr_text(normalized)
-                    candidates.append((score, normalized))
-            except Exception:
-                continue
-        if not candidates:
-            return ""
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        return candidates[0][1]
+        """画像または PDF から最も扱いやすいテキストを返す。"""
+        path = Path(image_path)
+        if not path.exists():
+            raise FileNotFoundError(f"入力ファイルが見つかりません: {image_path}")
+        if path.suffix.lower() in PDF_SUFFIXES:
+            return self._pdf_to_text(path)
+        return self._image_path_to_text(path)
 
     def extract_invoice_info(self, image_path: str) -> dict[str, object]:
-        """請求書や領収書風の画像から重要項目を抽出する。"""
+        """入力ファイルから主要な帳票情報を抽出する。"""
         full_text = self.image_to_text(image_path)
+        normalized_text = self._normalize_search_text(full_text)
         lines = [line.strip() for line in full_text.splitlines() if line.strip()]
+        key_values = self._extract_key_value_candidates(lines)
 
-        invoice_keywords = (
-            "請求書",
-            "請求番号",
-            "invoice",
-            "invoice no",
-            "receipt",
-            "領収書",
-            "精算",
-            "支払",
-            "合計",
-        )
-        document_type = next((line for line in lines[:8] if any(key in line.lower() for key in invoice_keywords)), None)
+        document_type = self._detect_document_type(full_text)
+        invoice_no = self._extract_invoice_number(normalized_text, lines, key_values)
+        amount = self._extract_amount(normalized_text, lines, key_values)
+        date_value = self._extract_date(normalized_text, lines, key_values)
+        seller = self._extract_party(normalized_text, lines, key_values, target="seller")
+        buyer = self._extract_party(normalized_text, lines, key_values, target="buyer")
 
         result = {
-            "document_type": document_type or self._guess_document_type(full_text),
-            "invoice_no": self._search_patterns(
-                full_text,
-                (
-                    r"(?:請求書番号|請求番号|伝票番号|Invoice\s*No\.?|No\.?)\s*[:：#\-]?\s*([A-Za-z0-9\-_\/]+)",
-                ),
-            ),
-            "amount": self._search_patterns(
-                full_text,
-                (
-                    r"(?:合計金額|請求金額|支払金額|税込合計|金額|Amount|Total)\s*[:：]?\s*[¥￥$]?\s*([\d,]+(?:\.\d+)?)",
-                    r"[¥￥]\s*([\d,]+)",
-                ),
-            ),
-            "date": self._search_patterns(
-                full_text,
-                (
-                    r"(?:請求日|発行日|日付|Date|Issued)\s*[:：]?\s*(\d{4}[./-]\d{1,2}[./-]\d{1,2})",
-                    r"(?:請求日|発行日|日付|Date|Issued)\s*[:：]?\s*(\d{4}年\d{1,2}月\d{1,2}日)",
-                    r"(令和\d+年\d+月\d+日)",
-                ),
-            ),
-            "seller": self._search_patterns(
-                full_text,
-                (
-                    r"(?:発行者|請求元|販売元|会社名|店舗名|差出人|Seller|Company)\s*[:：]?\s*(.+)",
-                ),
-                multiline=True,
-            ),
-            "buyer": self._search_patterns(
-                full_text,
-                (
-                    r"(?:請求先|宛先|取引先|Buyer|Bill To)\s*[:：]?\s*(.+)",
-                ),
-                multiline=True,
-            ),
+            "document_type": document_type,
+            "invoice_no": invoice_no,
+            "amount": amount,
+            "date": date_value,
+            "seller": seller,
+            "buyer": buyer,
             "full_text": full_text,
         }
-        result["amount_normalized"] = self._normalize_amount(result["amount"])
-        try:
-            result["layout_info"] = self._analyze_layout(image_path)
-        except Exception:
-            result["layout_info"] = {
-                "image_size": {"width": 0, "height": 0},
-                "table_regions": [],
-                "note": "版面解析に失敗しました。ファイル存在と画像形式を確認してください。",
-            }
+        result["amount_normalized"] = self._normalize_amount(amount)
+        result["layout_info"] = self._safe_layout_analysis(image_path)
         result["format_type"] = self._guess_format_type(result["layout_info"], full_text)
-        result["document_kind"] = self._guess_document_kind(full_text, result["document_type"])
+        result["document_kind"] = self._guess_document_kind(full_text, document_type)
         result["validation"] = self._validate_fields(result)
         return result
 
     def analyze_document(self, image_path: str) -> dict[str, object]:
-        """定型・非定型を含む文書全体を解析する。"""
+        """非定型文書も含めた分析レポートを返す。"""
         invoice_info = self.extract_invoice_info(image_path)
         full_text = invoice_info.get("full_text") or ""
         lines = [line.strip() for line in full_text.splitlines() if line.strip()]
@@ -132,39 +89,38 @@ class InvoiceRecognizer:
         }
 
     def archive_ocr_result(self, image_path: str, base_output_dir: str | None = None) -> dict[str, str]:
-        """OCR 結果をテキストと JSON で整理保存する。"""
-        image = Path(image_path)
-        if not image.exists():
-            raise FileNotFoundError(f"画像ファイルが見つかりません: {image_path}")
+        """OCR 結果を原本・テキスト・JSON で整理保存する。"""
+        source = Path(image_path)
+        if not source.exists():
+            raise FileNotFoundError(f"入力ファイルが見つかりません: {image_path}")
 
-        info = self.extract_invoice_info(str(image))
+        info = self.extract_invoice_info(str(source))
         seller = self._sanitize_name(info.get("seller") or "unknown_seller")
         date_value = self._sanitize_name(info.get("date") or datetime.now().strftime("%Y-%m-%d"))
-        invoice_no = self._sanitize_name(info.get("invoice_no") or image.stem)
+        invoice_no = self._sanitize_name(info.get("invoice_no") or source.stem)
 
         root = Path(base_output_dir) if base_output_dir else Path.cwd() / "output" / "ocr_archive"
         target_dir = root / seller / date_value
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        copied_image = target_dir / image.name
-        if image.resolve() != copied_image.resolve():
-            shutil.copy2(image, copied_image)
+        copied_source = target_dir / source.name
+        if source.resolve() != copied_source.resolve():
+            shutil.copy2(source, copied_source)
 
         text_path = target_dir / f"{invoice_no}.txt"
         json_path = target_dir / f"{invoice_no}.json"
-
         text_path.write_text(info.get("full_text") or "", encoding="utf-8")
         json_path.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
 
         return {
             "folder": str(target_dir),
-            "image_path": str(copied_image),
+            "image_path": str(copied_source),
             "text_path": str(text_path),
             "json_path": str(json_path),
         }
 
     def export_rpa_payload(self, image_path: str, base_output_dir: str | None = None) -> dict[str, str]:
-        """RPA 連携向け JSON を保存する。"""
+        """RPA 連携用 JSON を出力する。"""
         analysis = self.analyze_document(image_path)
         root = Path(base_output_dir) if base_output_dir else Path.cwd() / "output" / "ocr_rpa"
         root.mkdir(parents=True, exist_ok=True)
@@ -180,24 +136,224 @@ class InvoiceRecognizer:
 
         self._setup_tesseract(pytesseract)
         screenshot = ImageGrab.grab()
-        prepared = self._prepare_image(screenshot)
-        return self._normalize_text(pytesseract.image_to_string(prepared, lang=self.lang, config="--psm 6"))
+        return self._image_object_to_text(screenshot, pytesseract)
 
-    def _prepare_image(self, image):
-        """OCR しやすいように画像を前処理する。"""
+    def _image_path_to_text(self, path: Path) -> str:
+        """画像ファイルから OCR テキストを返す。"""
+        pytesseract, image_module = self._load_ocr_dependencies()
+        self._setup_tesseract(pytesseract)
+        image = image_module.open(path)
+        return self._image_object_to_text(image, pytesseract)
+
+    def _image_object_to_text(self, image, pytesseract_module) -> str:
+        """PIL 画像から最良の OCR テキストを返す。"""
+        candidates: list[tuple[int, str]] = []
+        for prepared in self._prepare_image_variants(image):
+            for config in ("--psm 6", "--psm 4", "--psm 11", "--psm 3"):
+                try:
+                    text = pytesseract_module.image_to_string(prepared, lang=self.lang, config=config)
+                except Exception:
+                    continue
+                normalized = self._normalize_text(text)
+                if not normalized:
+                    continue
+                candidates.append((self._score_ocr_text(normalized), normalized))
+
+        if not candidates:
+            return ""
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+
+    def _pdf_to_text(self, path: Path) -> str:
+        """PDF からテキストを抽出し、必要ならページ OCR で補う。"""
+        direct_text = self._extract_text_from_pdf(path)
+        direct_score = self._score_ocr_text(direct_text) if direct_text else 0
+
+        ocr_text = self._ocr_pdf_pages(path, max_pages=4)
+        ocr_score = self._score_ocr_text(ocr_text) if ocr_text else 0
+
+        if direct_score >= ocr_score and direct_text:
+            return direct_text
+        if ocr_text:
+            return ocr_text
+        return direct_text
+
+    def _extract_text_from_pdf(self, path: Path) -> str:
+        """PDF の埋め込みテキストを抽出する。"""
         try:
-            from PIL import ImageOps
+            from pypdf import PdfReader
+        except ModuleNotFoundError:
+            return ""
 
-            grayscale = image.convert("L")
-            enhanced = ImageOps.autocontrast(grayscale)
-            return enhanced
+        texts = []
+        try:
+            reader = PdfReader(str(path))
+            for page in reader.pages[:6]:
+                page_text = page.extract_text() or ""
+                normalized = self._normalize_text(page_text)
+                if normalized:
+                    texts.append(normalized)
         except Exception:
-            return image
+            return ""
+        return "\n".join(texts)
+
+    def _ocr_pdf_pages(self, path: Path, max_pages: int = 4) -> str:
+        """PDF ページを画像化して OCR を行う。"""
+        pytesseract, _image_module = self._load_ocr_dependencies()
+        self._setup_tesseract(pytesseract)
+
+        texts = []
+        for index, image in self._iter_pdf_page_images(path, max_pages=max_pages):
+            page_text = self._image_object_to_text(image, pytesseract)
+            if page_text:
+                texts.append(f"[page {index + 1}]\n{page_text}")
+        return "\n\n".join(texts)
+
+    def _iter_pdf_page_images(self, path: Path, max_pages: int = 4):
+        """PDF の先頭ページ群を PIL 画像へ変換する。"""
+        try:
+            import fitz
+            from PIL import Image
+        except ModuleNotFoundError as error:
+            raise ModuleNotFoundError("PDF OCR には PyMuPDF と Pillow が必要です。") from error
+
+        document = fitz.open(str(path))
+        try:
+            for index in range(min(max_pages, document.page_count)):
+                page = document.load_page(index)
+                matrix = fitz.Matrix(2, 2)
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                image = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
+                yield index, image
+        finally:
+            document.close()
+
+    def _prepare_image_variants(self, image):
+        """OCR 用に複数の前処理画像を返す。"""
+        try:
+            from PIL import ImageFilter, ImageOps
+        except Exception:
+            return [image]
+
+        base = image.convert("L")
+        auto = ImageOps.autocontrast(base)
+        sharpened = auto.filter(ImageFilter.SHARPEN)
+        binary = auto.point(lambda px: 255 if px > 180 else 0)
+        denoised = sharpened.filter(ImageFilter.MedianFilter(size=3))
+        return [auto, sharpened, binary, denoised]
+
+    def _safe_layout_analysis(self, image_path: str) -> dict[str, object]:
+        """レイアウト解析を安全に実行する。"""
+        try:
+            return self._analyze_layout(image_path)
+        except Exception:
+            return {
+                "image_size": {"width": 0, "height": 0},
+                "table_regions": [],
+                "note": "レイアウト解析に失敗しました。OCR テキストのみを利用してください。",
+            }
 
     def _setup_tesseract(self, pytesseract_module):
-        """Tesseract 実行ファイルの位置を反映する。"""
+        """Tesseract 実行ファイルの設定を行う。"""
         if DEFAULT_TESSERACT_PATH.exists():
             pytesseract_module.pytesseract.tesseract_cmd = str(DEFAULT_TESSERACT_PATH)
+
+    def _detect_document_type(self, text: str) -> str:
+        """文書タイトルや本文から種類を推定する。"""
+        lowered = self._normalize_search_text(text).lower()
+        for label, keywords in self.DOCUMENT_KEYWORDS.items():
+            if any(keyword.lower() in lowered for keyword in keywords):
+                return label
+        if "invoice no" in lowered or "bill to" in lowered:
+            return "請求書"
+        return "一般文書"
+
+    def _extract_invoice_number(self, text: str, lines: list[str], key_values: list[dict[str, str]]) -> str | None:
+        """請求番号系の値を抽出する。"""
+        patterns = (
+            r"(?:請求書番号|請求番号|伝票番号|帳票番号|invoice\s*no\.?|no\.?)\s*[:：#\-]?\s*([A-Za-z0-9\-_\/]+)",
+        )
+        match = self._search_patterns(text, patterns)
+        if match:
+            return match
+        return self._search_key_values(key_values, ("請求", "invoice", "番号", "no"))
+
+    def _extract_amount(self, text: str, lines: list[str], key_values: list[dict[str, str]]) -> str | None:
+        """金額を抽出する。"""
+        patterns = (
+            r"(?:合計金額|請求金額|金額|総額|amount|total)\s*[:：]?\s*[¥￥$]?\s*([\d,]+(?:\.\d+)?)",
+            r"[¥￥$]\s*([\d,]+(?:\.\d+)?)",
+        )
+        match = self._search_patterns(text, patterns)
+        if match:
+            return match
+
+        for line in lines:
+            if any(keyword in line.lower() for keyword in ("amount", "total")) or any(
+                keyword in line for keyword in ("金額", "合計", "総額")
+            ):
+                number = self._extract_first_number(line)
+                if number:
+                    return number
+        return self._search_key_values(key_values, ("金額", "合計", "total", "amount"))
+
+    def _extract_date(self, text: str, lines: list[str], key_values: list[dict[str, str]]) -> str | None:
+        """日付を抽出する。"""
+        patterns = (
+            r"(?:請求日|発行日|日付|date|issued)\s*[:：]?\s*(\d{4}[./-]\d{1,2}[./-]\d{1,2})",
+            r"(?:請求日|発行日|日付|date|issued)\s*[:：]?\s*(\d{4}年\d{1,2}月\d{1,2}日)",
+            r"(令和\d+年\d+月\d+日)",
+        )
+        match = self._search_patterns(text, patterns)
+        if match:
+            return match
+        return self._search_key_values(key_values, ("日付", "発行", "date", "issued"))
+
+    def _extract_party(
+        self,
+        text: str,
+        lines: list[str],
+        key_values: list[dict[str, str]],
+        target: str,
+    ) -> str | None:
+        """売り手または宛先を抽出する。"""
+        if target == "seller":
+            patterns = (r"(?:発行元|請求元|販売元|会社名|seller|company)\s*[:：]?\s*(.+)",)
+            fallback_keywords = ("株式会社", "有限会社", "company", "corp", "inc")
+        else:
+            patterns = (r"(?:宛先|請求先|御中|様|buyer|bill to)\s*[:：]?\s*(.+)",)
+            fallback_keywords = ("御中", "様", "bill to", "buyer")
+
+        match = self._search_patterns(text, patterns, multiline=True)
+        if match:
+            return self._clean_party_name(match)
+
+        key_value = self._search_key_values(
+            key_values,
+            ("会社", "発行", "seller", "company") if target == "seller" else ("宛先", "請求先", "buyer", "bill"),
+        )
+        if key_value:
+            return self._clean_party_name(key_value)
+
+        for line in lines:
+            normalized = self._normalize_search_text(line).lower()
+            if any(keyword.lower() in normalized for keyword in fallback_keywords):
+                return self._clean_party_name(line)
+        return None
+
+    def _search_key_values(self, key_values: list[dict[str, str]], keywords: tuple[str, ...]) -> str | None:
+        """キー候補から値を引く。"""
+        for row in key_values:
+            key = self._normalize_search_text(row.get("key", "")).lower()
+            if any(keyword.lower() in key for keyword in keywords):
+                value = row.get("value", "").strip()
+                return value or None
+        return None
+
+    def _extract_first_number(self, text: str) -> str | None:
+        """行内の最初の数値表現を返す。"""
+        match = re.search(r"([\d,]+(?:\.\d+)?)", self._normalize_search_text(text))
+        return match.group(1) if match else None
 
     def _search_patterns(self, text: str, patterns: tuple[str, ...], multiline: bool = False) -> str | None:
         """複数パターンから最初に見つかった値を返す。"""
@@ -210,86 +366,83 @@ class InvoiceRecognizer:
         return None
 
     def _normalize_amount(self, amount: str | None) -> str | None:
-        """金額を表示しやすい形に整える。"""
+        """金額を表示しやすい形へ整える。"""
         if not amount:
             return None
         normalized = amount.replace(",", "").replace(" ", "")
-        if normalized.isdigit():
+        if re.fullmatch(r"\d+(?:\.\d+)?", normalized):
+            if "." in normalized:
+                return f"¥{float(normalized):,.2f}"
             return f"¥{int(normalized):,}"
         return amount
 
-    def _guess_document_type(self, text: str) -> str:
-        """本文から帳票種別を推定する。"""
-        lowered = text.lower()
-        if "領収書" in text or "receipt" in lowered:
-            return "領収書"
-        if "精算" in text or "経費" in text:
-            return "精算書"
-        if "請求" in text or "invoice" in lowered:
-            return "請求書"
-        return "帳票"
-
     def _guess_document_kind(self, text: str, detected_type: str | None) -> str:
-        """文書種別を広めに推定する。"""
-        lowered = text.lower()
-        if detected_type and detected_type != "帳票":
+        """文書カテゴリをやや広めに推定する。"""
+        lowered = self._normalize_search_text(text).lower()
+        if detected_type and detected_type != "一般文書":
             return detected_type
-        if any(keyword in text for keyword in ("申込書", "申請書", "注文書", "納品書")):
-            return "業務帳票"
-        if any(keyword in text for keyword in ("手書き", "メモ", "打合せ", "議事録")):
-            return "メモ/記録"
-        if any(keyword in text for keyword in ("契約", "agreement", "契約書")):
+        if any(keyword in lowered for keyword in ("メモ", "memo", "議事録")):
+            return "メモ / 議事録"
+        if any(keyword in lowered for keyword in ("report", "article", "news")):
+            return "記事 / レポート"
+        if any(keyword in lowered for keyword in ("agreement", "contract")):
             return "契約関連"
-        if any(keyword in lowered for keyword in ("article", "report", "news")):
-            return "記事/レポート"
         return "一般文書"
 
-    def _guess_format_type(self, layout_info: dict, full_text: str) -> str:
-        """定型/非定型を判定する。"""
+    def _guess_format_type(self, layout_info: dict[str, object], full_text: str) -> str:
+        """定型 / 非定型を推定する。"""
         table_regions = layout_info.get("table_regions") or []
-        structured_keywords = ("請求書", "領収書", "申込書", "注文書", "invoice", "receipt")
-        if table_regions or any(keyword.lower() in full_text.lower() for keyword in structured_keywords):
+        lowered = self._normalize_search_text(full_text).lower()
+        if table_regions:
+            return "定型"
+        if any(keyword.lower() in lowered for keyword in ("請求書", "領収書", "invoice", "receipt", "見積書")):
             return "定型"
         return "非定型"
 
     def _normalize_text(self, text: str) -> str:
-        """改行と空白を整えて返す。"""
+        """改行や空白を整理して OCR テキストを正規化する。"""
+        text = unicodedata.normalize("NFKC", text)
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         lines = [line.strip() for line in text.split("\n")]
         return "\n".join(line for line in lines if line)
 
+    def _normalize_search_text(self, text: str) -> str:
+        """検索向けに全文字を整形する。"""
+        return unicodedata.normalize("NFKC", text or "")
+
     def _score_ocr_text(self, text: str) -> int:
-        """OCR テキストの簡易品質スコアを返す。"""
+        """OCR 候補テキストの品質スコアを返す。"""
         score = len(text)
         score += len(re.findall(r"\d", text)) * 2
-        score += len(re.findall(r"(請求|領収|金額|合計|invoice|receipt)", text, re.IGNORECASE)) * 20
+        score += len(re.findall(r"(請求書|領収書|invoice|receipt|金額|amount|date)", text, re.IGNORECASE)) * 20
+        score += min(len(text.splitlines()), 20) * 3
         return score
 
     def _extract_key_value_candidates(self, lines: list[str]) -> list[dict[str, str]]:
-        """非定型文書からキー/値候補を抽出する。"""
+        """非定型文書からキー / 値候補を抽出する。"""
         results: list[dict[str, str]] = []
         for line in lines:
-            if len(results) >= 16:
+            if len(results) >= 20:
                 break
             match = re.match(r"^\s*([^:：]{1,24})\s*[:：]\s*(.+)$", line)
             if match:
                 results.append({"key": match.group(1).strip(), "value": match.group(2).strip()})
                 continue
-            spaced = re.match(r"^\s*([^\s]{1,20})\s{2,}(.+)$", line)
+            spaced = re.match(r"^\s*(\S.{0,20}?)\s{2,}(.+)$", line)
             if spaced:
                 results.append({"key": spaced.group(1).strip(), "value": spaced.group(2).strip()})
         return results
 
     def _extract_sections(self, lines: list[str]) -> list[dict[str, str]]:
-        """文書冒頭の要点ブロックを作る。"""
+        """文書全体の簡易セクションを返す。"""
         sections: list[dict[str, str]] = []
         if not lines:
             return sections
         sections.append({"title": "冒頭", "content": lines[0][:120]})
         if len(lines) > 1:
-            sections.append({"title": "本文候補", "content": " / ".join(lines[1:4])[:180]})
+            sections.append({"title": "本文要約", "content": " / ".join(lines[1:4])[:180]})
         if len(lines) > 4:
-            sections.append({"title": "後半候補", "content": " / ".join(lines[-3:])[:180]})
+            sections.append({"title": "末尾要約", "content": " / ".join(lines[-3:])[:180]})
         return sections
 
     def _build_rpa_payload(
@@ -298,7 +451,8 @@ class InvoiceRecognizer:
         invoice_info: dict[str, object],
         key_values: list[dict[str, str]],
     ) -> dict[str, object]:
-        """RPA 連携向けの正規化 JSON を返す。"""
+        """RPA 連携向けの JSON を組み立てる。"""
+        score = int((invoice_info.get("validation") or {}).get("score", 0))
         return {
             "source_image": str(Path(image_path).resolve()),
             "format_type": invoice_info.get("format_type", "非定型"),
@@ -313,9 +467,7 @@ class InvoiceRecognizer:
             },
             "key_values": key_values,
             "validation": invoice_info.get("validation", {}),
-            "next_actions": self._build_validation_recommendation(
-                int((invoice_info.get("validation") or {}).get("score", 0))
-            ),
+            "next_actions": self._build_validation_recommendation(score),
         }
 
     def _build_automation_points(
@@ -323,34 +475,50 @@ class InvoiceRecognizer:
         invoice_info: dict[str, object],
         key_values: list[dict[str, str]],
     ) -> list[str]:
-        """RPA 連携時の自動化ポイントを返す。"""
+        """RPA 連携で使いやすいアクション案を返す。"""
         points = []
         if invoice_info.get("invoice_no"):
-            points.append("請求番号を業務システムのキー項目へ自動入力できます。")
+            points.append("請求番号を基幹システムの検索キーへ自動転記できます。")
         if invoice_info.get("amount_normalized") or invoice_info.get("amount"):
-            points.append("金額を精算・会計フローへ引き渡す候補があります。")
+            points.append("金額を経費申請や請求管理フローへ自動入力できます。")
         if key_values:
-            points.append("非定型文書でもキー/値候補を RPA マッピングに利用できます。")
-        points.append("検証スコアが低い場合は人手確認ステップを残す構成を推奨します。")
+            points.append("非定型文書でもキー / 値候補を RPA マッピングに活用できます。")
+        points.append("確認スコアが低い場合は人手確認ステップを残す運用が安全です。")
         return points
 
     def _load_ocr_dependencies(self):
-        """OCR に必要なライブラリを読み込む。"""
+        """OCR 依存ライブラリを読み込む。"""
         try:
             import pytesseract
             from PIL import Image
         except ModuleNotFoundError as error:
-            raise ModuleNotFoundError(
-                "OCR 機能には pytesseract と Pillow が必要です。"
-            ) from error
+            raise ModuleNotFoundError("OCR 機能には pytesseract と Pillow が必要です。") from error
         return pytesseract, Image
 
-    def _analyze_layout(self, image_path: str) -> dict:
-        """画像の版面情報を解析し、表領域候補を返す。"""
+    def _analyze_layout(self, image_path: str) -> dict[str, object]:
+        """画像または PDF から表領域候補を抽出する。"""
+        if Path(image_path).suffix.lower() in PDF_SUFFIXES:
+            page_images = list(self._iter_pdf_page_images(Path(image_path), max_pages=1))
+            if not page_images:
+                return {
+                    "image_size": {"width": 0, "height": 0},
+                    "table_regions": [],
+                    "note": "PDF ページを画像化できませんでした。",
+                }
+            return self._analyze_layout_image(page_images[0][1])
+
         pytesseract, image_module = self._load_ocr_dependencies()
-        self._setup_tesseract(pytesseract)
         image = image_module.open(image_path)
-        prepared = self._prepare_image(image)
+        return self._analyze_layout_image(image, pytesseract_module=pytesseract)
+
+    def _analyze_layout_image(self, image, pytesseract_module=None) -> dict[str, object]:
+        """PIL 画像から表領域候補を抽出する。"""
+        pytesseract = pytesseract_module
+        if pytesseract is None:
+            pytesseract, _image_module = self._load_ocr_dependencies()
+        self._setup_tesseract(pytesseract)
+
+        prepared = self._prepare_image_variants(image)[0]
         width, height = prepared.size
         output_dict = pytesseract.image_to_data(
             prepared,
@@ -359,23 +527,23 @@ class InvoiceRecognizer:
             output_type=pytesseract.Output.DICT,
         )
 
-        row_candidates = []
-        row_map: dict[tuple[int, int, int], list[dict]] = {}
+        row_map: dict[tuple[int, int, int], list[dict[str, int | str]]] = {}
         total_items = len(output_dict.get("text", []))
         for index in range(total_items):
             text = (output_dict["text"][index] or "").strip()
             if not text:
                 continue
             try:
-                conf = float(output_dict["conf"][index])
+                confidence = float(output_dict["conf"][index])
             except (TypeError, ValueError):
-                conf = -1.0
-            if conf < 20:
+                confidence = -1.0
+            if confidence < 20:
                 continue
-            block_num = int(output_dict["block_num"][index])
-            par_num = int(output_dict["par_num"][index])
-            line_num = int(output_dict["line_num"][index])
-            key = (block_num, par_num, line_num)
+            key = (
+                int(output_dict["block_num"][index]),
+                int(output_dict["par_num"][index]),
+                int(output_dict["line_num"][index]),
+            )
             row_map.setdefault(key, []).append(
                 {
                     "text": text,
@@ -386,13 +554,14 @@ class InvoiceRecognizer:
                 }
             )
 
+        row_candidates = []
         for words in row_map.values():
             if len(words) < 3:
                 continue
-            left = min(word["x"] for word in words)
-            right = max(word["x"] + word["w"] for word in words)
-            top = min(word["y"] for word in words)
-            bottom = max(word["y"] + word["h"] for word in words)
+            left = min(int(word["x"]) for word in words)
+            right = max(int(word["x"]) + int(word["w"]) for word in words)
+            top = min(int(word["y"]) for word in words)
+            bottom = max(int(word["y"]) + int(word["h"]) for word in words)
             coverage = (right - left) / max(width, 1)
             if coverage < 0.35:
                 continue
@@ -447,45 +616,50 @@ class InvoiceRecognizer:
 
         table_regions = [region for region in merged_regions if region["line_count"] >= 3 and region["word_count"] >= 10]
         table_regions = sorted(table_regions, key=lambda item: item["word_count"], reverse=True)[:4]
-        layout_note = (
-            "表形式の領域を検出しました。"
-            if table_regions
-            else "明確な表形式領域は検出できませんでした。"
-        )
+        note = "表形式の候補領域を検出しました。" if table_regions else "表形式の候補は検出できませんでした。"
         return {
             "image_size": {"width": width, "height": height},
             "table_regions": table_regions,
-            "note": layout_note,
+            "note": note,
         }
 
-    def _validate_fields(self, result: dict) -> dict:
-        """抽出フィールドの妥当性を評価する。"""
+    def _validate_fields(self, result: dict[str, object]) -> dict[str, object]:
+        """抽出フィールドの妥当性チェックを返す。"""
         checks = []
 
         invoice_no = result.get("invoice_no")
-        if invoice_no and len(str(invoice_no)) >= 3:
-            checks.append({"field": "請求番号", "status": "OK", "message": "請求番号を抽出しました。"})
-        else:
-            checks.append({"field": "請求番号", "status": "要確認", "message": "請求番号が不明です。"})
+        checks.append(
+            {
+                "field": "請求番号",
+                "status": "OK" if invoice_no and len(str(invoice_no)) >= 3 else "確認要",
+                "message": f"請求番号: {invoice_no}" if invoice_no else "請求番号を検出できませんでした。",
+            }
+        )
 
         amount = result.get("amount_normalized") or result.get("amount")
-        if amount and re.search(r"\d", str(amount)):
-            checks.append({"field": "金額", "status": "OK", "message": f"金額候補: {amount}"})
-        else:
-            checks.append({"field": "金額", "status": "要確認", "message": "金額を抽出できませんでした。"})
+        checks.append(
+            {
+                "field": "金額",
+                "status": "OK" if amount and re.search(r"\d", str(amount)) else "確認要",
+                "message": f"金額: {amount}" if amount else "金額を検出できませんでした。",
+            }
+        )
 
         date_value = result.get("date")
-        if date_value and self._is_date_like(str(date_value)):
-            checks.append({"field": "日付", "status": "OK", "message": f"日付候補: {date_value}"})
-        else:
-            checks.append({"field": "日付", "status": "要確認", "message": "日付形式の候補が不足しています。"})
+        checks.append(
+            {
+                "field": "日付",
+                "status": "OK" if date_value and self._is_date_like(str(date_value)) else "確認要",
+                "message": f"日付: {date_value}" if date_value else "日付形式の候補が見つかりませんでした。",
+            }
+        )
 
         seller = result.get("seller")
         checks.append(
             {
                 "field": "発行元",
-                "status": "OK" if seller else "要確認",
-                "message": f"発行元: {seller}" if seller else "発行元が抽出できませんでした。",
+                "status": "OK" if seller else "確認要",
+                "message": f"発行元: {seller}" if seller else "発行元を検出できませんでした。",
             }
         )
 
@@ -493,16 +667,12 @@ class InvoiceRecognizer:
         checks.append(
             {
                 "field": "宛先",
-                "status": "OK" if buyer else "要確認",
-                "message": f"宛先: {buyer}" if buyer else "宛先が抽出できませんでした。",
+                "status": "OK" if buyer else "確認要",
+                "message": f"宛先: {buyer}" if buyer else "宛先を検出できませんでした。",
             }
         )
 
-        score = 100
-        for check in checks:
-            if check["status"] != "OK":
-                score -= 18
-        score = max(0, score)
+        score = max(0, 100 - sum(18 for check in checks if check["status"] != "OK"))
         return {
             "score": score,
             "checks": checks,
@@ -510,7 +680,7 @@ class InvoiceRecognizer:
         }
 
     def _is_date_like(self, value: str) -> bool:
-        """日付らしい文字列かを判定する。"""
+        """日付らしい文字列かどうか判定する。"""
         patterns = (
             r"\d{4}[./-]\d{1,2}[./-]\d{1,2}",
             r"\d{4}年\d{1,2}月\d{1,2}日",
@@ -519,15 +689,26 @@ class InvoiceRecognizer:
         return any(re.search(pattern, value) for pattern in patterns)
 
     def _build_validation_recommendation(self, score: int) -> str:
-        """検証スコアから推奨アクションを返す。"""
+        """スコアから確認アクションを返す。"""
         if score >= 82:
-            return "抽出精度は高めです。金額と日付のみ原本照合すれば保存可能です。"
+            return "抽出精度は高めです。金額と日付を原本と照合してから登録してください。"
         if score >= 60:
-            return "一部項目の再確認が必要です。請求番号・発行元を重点チェックしてください。"
-        return "抽出品質が低い可能性があります。解像度の高い画像で再OCRし、手動補正を推奨します。"
+            return "一部項目の確認が必要です。請求番号・発行元・宛先を重点確認してください。"
+        return "抽出品質が不安定です。画像の再スキャンや手動確認を優先してください。"
+
+    def _clean_party_name(self, value: str) -> str:
+        """会社名や宛先の余分な記号を取り除く。"""
+        cleaned = value.strip().strip(":：- ")
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        if cleaned.lower().startswith(("seller", "company", "buyer", "bill to")):
+            parts = re.split(r"[:：]", cleaned, maxsplit=1)
+            if len(parts) == 2:
+                cleaned = parts[1].strip()
+        cleaned = re.sub(r"^(発行元|会社名|請求元|販売元|宛先|請求先)\s*", "", cleaned)
+        return cleaned.strip() or value.strip()
 
     def _sanitize_name(self, value: str) -> str:
-        """保存先フォルダで使える安全な文字列に変換する。"""
+        """保存先ファイル名に使える安全な文字列へ変換する。"""
         cleaned = re.sub(r"[\\/:*?\"<>|]+", "_", value).strip()
         cleaned = cleaned.replace(" ", "_")
         return cleaned[:80] or "unknown"

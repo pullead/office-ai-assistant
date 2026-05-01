@@ -43,6 +43,17 @@ TYPE_FILTERS = {
 }
 
 
+# 旧定義に文字化けが混在していたため、実運用で使うフィルター定義をここで明示的に上書きする。
+TYPE_FILTERS = {
+    "すべて": set(),
+    "文書": {".txt", ".md", ".doc", ".docx", ".pdf"},
+    "表計算": {".csv", ".xlsx", ".xls"},
+    "画像": {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"},
+    "コード": {".py", ".js", ".ts", ".java", ".cpp", ".c", ".cs", ".go", ".rs"},
+    "アーカイブ": {".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz"},
+}
+
+
 class FileFilterProxyModel(QSortFilterProxyModel):
     """ツリー表示向けのファイル絞り込み。"""
 
@@ -382,6 +393,7 @@ class FileTab(BaseTab):
         self.archive_btn.setObjectName("ToolButton")
         self.archive_btn.setMinimumHeight(40)
         self.archive_btn.clicked.connect(self._browse_archive)
+        self.archive_btn.setText("ZIP / TAR を閲覧")
         controls_layout.addWidget(self.archive_btn)
 
         controls_layout.addWidget(make_section_label("検索"))
